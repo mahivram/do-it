@@ -35,6 +35,18 @@ The default prompt opens Notepad, brings it to the foreground, and types
 `hello`. Change the `run_agent(...)` prompt at the bottom of `agent.py` to give
 the agent a different initial task.
 
+## Tests
+
+Run every unit test from the project root with one command:
+
+```powershell
+python run_tests.py
+```
+
+The tests mock Windows APIs and process calls; they do not send real input,
+launch applications, or terminate processes. Tests cover tool functions and
+their inputs/outputs; they do not test LLM agent orchestration.
+
 ## Available tools
 
 - **Windows:** list visible windows, focus a window, open an application, close a

@@ -1,5 +1,6 @@
 import os
 import json
+from pathlib import Path
 from openai import OpenAI
 from win32_helper import (
     close_window,
@@ -7,6 +8,22 @@ from win32_helper import (
     get_active_windows,
     open_window,
 )
+
+env_file = Path(__file__).with_name(".env")
+if env_file.exists():
+    for line_number, line in enumerate(
+        env_file.read_text(encoding="utf-8").splitlines(), start=1
+    ):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        name, separator, value = line.partition("=")
+        if not separator or not name.strip():
+            raise ValueError(f"Invalid entry in .env at line {line_number}")
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        os.environ.setdefault(name.strip(), value)
 
 # OpenRouter uses the standard OpenAI client SDK
 client = OpenAI(

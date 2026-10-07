@@ -46,6 +46,8 @@ def run_agent(user_prompt: str) -> None:
                 "'list' and path '.'. Always provide every required tool argument. "
                 "Only terminate a process when the user explicitly asks; identify "
                 "its PID before calling kill_process."
+                "System-changing operations require the user to type 'yes' "
+                "in the terminal; never imply they have occurred if they cancel."
             ),
         },
         {"role": "user", "content": user_prompt},

@@ -12,3 +12,6 @@
 - Keep tests colocated by subsystem under `tests/` and use the standard-library
   `unittest` framework unless the project adopts another test runner.
 - Keep API keys and other secrets out of tests, fixtures, and committed files.
+- Mock PowerShell, confirmation prompts, Windows APIs, and process calls in
+  unit tests; never run real power, update, restore-point, feature, or process
+  changes from the test suite.

@@ -10,6 +10,17 @@ from automation.input import (
     type_text,
 )
 from automation.processes import kill_process
+from automation.system import (
+    create_system_restore_point,
+    get_hardware_info,
+    get_power_info,
+    get_system_info,
+    get_system_uptime,
+    list_environment_variables,
+    manage_power,
+    manage_windows_features,
+    manage_windows_updates,
+)
 from automation.windows import (
     close_window,
     focus_and_bring_to_front,
@@ -20,6 +31,117 @@ from automation.windows import (
 
 
 TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_system_info",
+            "description": "Get Windows OS version, build, and architecture.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_system_uptime",
+            "description": "Get system uptime and last boot time.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_hardware_info",
+            "description": "Get CPU, RAM, disk, and GPU information.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_environment_variables",
+            "description": "List environment variables, redacting variables whose names indicate secrets or credentials.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_power",
+            "description": "Shutdown, restart, sleep, hibernate, or lock Windows. Requires direct confirmation in the user's terminal.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["shutdown", "restart", "sleep", "hibernate", "lock"],
+                    }
+                },
+                "required": ["action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_system_restore_point",
+            "description": "Create a Windows system restore point after direct terminal confirmation. May require administrator privileges and System Protection to be enabled.",
+            "parameters": {
+                "type": "object",
+                "properties": {"description": {"type": "string"}},
+                "required": ["description"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_windows_updates",
+            "description": "List available Windows Updates, or install/hide a specific update by its update_id. Install and hide require direct terminal confirmation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["list", "install", "hide"],
+                    },
+                    "update_id": {
+                        "type": "string",
+                        "description": "Update GUID returned by the list action.",
+                    },
+                },
+                "required": ["action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_windows_features",
+            "description": "List Windows optional features, or enable/disable a feature. Changes require direct terminal confirmation and administrator privileges.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["list", "enable", "disable"],
+                    },
+                    "feature_name": {
+                        "type": "string",
+                        "description": "FeatureName returned by the list action.",
+                    },
+                },
+                "required": ["action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_power_info",
+            "description": "Get battery status and configured Windows power plans.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
     {
         "type": "function",
         "function": {
@@ -208,6 +330,15 @@ TOOLS = [
 ]
 
 TOOL_MAP = {
+    "get_system_info": get_system_info,
+    "get_system_uptime": get_system_uptime,
+    "get_hardware_info": get_hardware_info,
+    "list_environment_variables": list_environment_variables,
+    "manage_power": manage_power,
+    "create_system_restore_point": create_system_restore_point,
+    "manage_windows_updates": manage_windows_updates,
+    "manage_windows_features": manage_windows_features,
+    "get_power_info": get_power_info,
     "get_active_windows": get_active_windows,
     "focus_and_bring_to_front": focus_and_bring_to_front,
     "set_window_bounds": set_window_bounds,

@@ -60,6 +60,13 @@ their inputs/outputs; they do not test LLM agent orchestration.
 - **Project files:** list, read, create, write, delete, and rename files and
   folders. Paths are restricted to the project directory; deleting a directory
   also deletes its contents.
+- **System and hardware:** inspect Windows version/build/architecture, uptime,
+  CPU, memory, disks, GPUs, environment variables (sensitive values are
+  redacted), battery, and power plans. Shutdown/restart/sleep/hibernate/lock,
+  restore-point creation, Windows Update install/hide, and optional-feature
+  changes require typing `yes` in the terminal. Update and feature listing is
+  read-only. Administrative actions may require running the terminal as
+  administrator.
 
 ## Project layout
 
@@ -71,6 +78,7 @@ automation/
   windows.py             Window management
   input.py               Keyboard and mouse input
   processes.py           Process management
+  system.py              System information and confirmed system controls
   files.py               Project-scoped file management
 win32_helper.py          Compatibility imports for older scripts
 file_tools.py            Compatibility imports for older scripts

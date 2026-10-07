@@ -7,6 +7,11 @@ from win32_helper import (
     focus_and_bring_to_front,
     get_active_windows,
     open_window,
+    type_text,
+    press_key,
+    move_mouse,
+    click_mouse,
+    scroll_mouse,
 )
 from file_tools import manage_files
 
@@ -140,6 +145,80 @@ tools = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "type_text",
+            "description": "Type Unicode text into the currently focused application.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "Text to type (up to 5000 characters)."}
+                },
+                "required": ["text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "press_key",
+            "description": "Press and release a named key, optionally with modifiers. Keys include enter, tab, escape, arrows, backspace, delete, space, home, end, page_up, page_down, and f1-f12.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string"},
+                    "modifiers": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": ["ctrl", "alt", "shift", "win"]},
+                    },
+                },
+                "required": ["key"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "move_mouse",
+            "description": "Move the mouse pointer to absolute screen coordinates.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "x": {"type": "integer"},
+                    "y": {"type": "integer"},
+                },
+                "required": ["x", "y"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "click_mouse",
+            "description": "Click the mouse button at the current pointer position.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "button": {"type": "string", "enum": ["left", "right", "middle"]},
+                    "clicks": {"type": "integer", "minimum": 1, "maximum": 10},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "scroll_mouse",
+            "description": "Scroll the mouse wheel; positive delta scrolls up, negative delta scrolls down.",
+            "parameters": {
+                "type": "object",
+                "properties": {"delta": {"type": "integer"}},
+                "required": ["delta"],
+            },
+        },
+    },
 ]
 
 # Map tool names to actual functions
@@ -149,6 +228,11 @@ TOOL_MAP = {
     "open_window": open_window,
     "close_window": close_window,
     "manage_files": manage_files,
+    "type_text": type_text,
+    "press_key": press_key,
+    "move_mouse": move_mouse,
+    "click_mouse": click_mouse,
+    "scroll_mouse": scroll_mouse,
 }
 
 TOOL_SCHEMAS = {
@@ -183,6 +267,8 @@ def execute_tool_call(function_name: str, raw_arguments: str):
     try:
         return tool_func(**arguments)
     except TypeError as exc:
+        return {"error": f"Invalid arguments for {function_name}: {exc}"}
+    except ValueError as exc:
         return {"error": f"Invalid arguments for {function_name}: {exc}"}
 
 
@@ -239,4 +325,4 @@ def run_agent(user_prompt: str):
             break
 
 if __name__ == "__main__":
-    run_agent("open Notepad application and bring it to the front. and also whic which folder file here ")
+    run_agent("open Notepad application and bring it to the front. and type hello ")

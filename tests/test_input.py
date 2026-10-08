@@ -44,6 +44,21 @@ class KeyboardTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Modifiers"):
             press_key("enter", ["meta"])
 
+    def test_press_key_supports_letters_and_digits_with_modifiers(self):
+        self.assertEqual(press_key("a", ["ctrl"]), "Pressed ctrl+a")
+        self.assertEqual(
+            [(event[0], event[2]) for event in win32api.key_events],
+            [
+                (win32con.VK_CONTROL, 0),
+                (ord("A"), 0),
+                (ord("A"), 2),
+                (win32con.VK_CONTROL, 2),
+            ],
+        )
+        win32api.key_events.clear()
+        self.assertEqual(press_key("7"), "Pressed 7")
+        self.assertEqual([event[0] for event in win32api.key_events], [ord("7"), ord("7")])
+
     def test_press_key_releases_pressed_modifiers_if_press_raises(self):
         calls = []
 

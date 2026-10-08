@@ -10,6 +10,16 @@ class ToolDispatchTests(unittest.TestCase):
         schema_names = {tool["function"]["name"] for tool in TOOLS}
         self.assertEqual(schema_names, set(TOOL_MAP))
         self.assertEqual(schema_names, set(TOOL_SCHEMAS))
+        self.assertNotIn("telegram_list_chats", schema_names)
+
+    def test_telegram_message_requires_a_named_target(self):
+        self.assertIn(
+            "chat_name",
+            execute_tool_call(
+                "telegram_send_message",
+                '{"text":"hello"}',
+            )["error"],
+        )
 
     def test_reports_unknown_tool_invalid_json_and_non_object_arguments(self):
         self.assertIn("error", execute_tool_call("unknown", "{}"))

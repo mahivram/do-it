@@ -24,6 +24,8 @@ _KEYS = {
     "shift": win32con.VK_SHIFT,
     "win": win32con.VK_LWIN,
 }
+_KEYS.update({chr(code).lower(): code for code in range(ord("A"), ord("Z") + 1)})
+_KEYS.update({str(digit): ord(str(digit)) for digit in range(10)})
 _KEYS.update({f"f{number}": win32con.VK_F1 + number - 1 for number in range(1, 13)})
 _VK_PACKET = 0xE7
 _KEYEVENTF_UNICODE = 0x0004

@@ -1,6 +1,14 @@
 import json
 from subprocess import SubprocessError
 
+from apps.telegram.desktop import (
+    open_chat,
+    open_telegram,
+    read_messages,
+    search_chats,
+    send_message,
+)
+from automation.dependencies import manage_project_dependencies
 from automation.files import manage_files
 from automation.input import (
     click_mouse,
@@ -31,6 +39,89 @@ from automation.windows import (
 
 
 TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_project_dependencies",
+            "description": (
+                "Check this project's required Python packages or install them "
+                "from requirements.txt into the Python interpreter currently "
+                "running the agent. Installation requires the user to type yes "
+                "in the terminal. Use when a tool reports a missing dependency."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["check", "install"]}
+                },
+                "required": ["action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "telegram_open",
+            "description": "Open or focus the user's logged-in Telegram Desktop app.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "telegram_search_chats",
+            "description": "Search Telegram Desktop for a person, group, or channel by name.",
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "telegram_open_chat",
+            "description": "Search for and open one uniquely matching Telegram chat, group, or channel.",
+            "parameters": {
+                "type": "object",
+                "properties": {"chat_name": {"type": "string"}},
+                "required": ["chat_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "telegram_read_messages",
+            "description": "Read visible message text from the currently open Telegram chat.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 100}
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "telegram_send_message",
+            "description": "Search for and open the specified Telegram person, group, or channel, then send only after the user types yes in the terminal.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "chat_name": {
+                        "type": "string",
+                        "description": "Person, group, or channel to search for and message.",
+                    },
+                    "text": {"type": "string", "maxLength": 4096}
+                },
+                "required": ["chat_name", "text"],
+            },
+        },
+    },
     {
         "type": "function",
         "function": {
@@ -330,6 +421,12 @@ TOOLS = [
 ]
 
 TOOL_MAP = {
+    "manage_project_dependencies": manage_project_dependencies,
+    "telegram_open": open_telegram,
+    "telegram_search_chats": search_chats,
+    "telegram_open_chat": open_chat,
+    "telegram_read_messages": read_messages,
+    "telegram_send_message": send_message,
     "get_system_info": get_system_info,
     "get_system_uptime": get_system_uptime,
     "get_hardware_info": get_hardware_info,

@@ -53,6 +53,30 @@ class ProviderConfigurationTests(unittest.TestCase):
         )
         self.assertEqual(session.model, "router-test")
 
+    @patch.dict(
+        os.environ,
+        {
+            "AI_PROVIDER": "openrouter",
+            "OPENROUTER_BASE_URL": "https://api.freellm.example/v1",
+            "FREELLM_API_KEY": "unified-test-key",
+        },
+        clear=True,
+    )
+    @patch("automation.providers.OpenAI")
+    def test_uses_custom_router_endpoint_and_freellm_unified_key(self, client_factory):
+        session = create_provider_session("system", "user", TOOLS)
+
+        self.assertIsInstance(session, OpenRouterSession)
+        client_factory.assert_called_once_with(
+            base_url="https://api.freellm.example/v1",
+            api_key="unified-test-key",
+        )
+
+    @patch.dict(os.environ, {"AI_PROVIDER": "openrouter"}, clear=True)
+    def test_requires_router_or_freellm_key(self):
+        with self.assertRaisesRegex(ValueError, "FREELLM_API_KEY"):
+            create_provider_session("system", "user", TOOLS)
+
     @patch.dict(os.environ, {"AI_PROVIDER": "gemini"}, clear=True)
     def test_requires_key_for_selected_provider(self):
         with self.assertRaisesRegex(ValueError, "GEMINI_API_KEY"):

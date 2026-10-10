@@ -1,14 +1,14 @@
 # Do It
 
-A Windows desktop automation agent that uses selectable OpenRouter or Google
-Gemini providers to manage windows, keyboard and mouse input, processes, and
-project files.
+A Windows desktop automation agent that uses an OpenAI-compatible router
+(OpenRouter by default) or Google Gemini to manage windows, keyboard and mouse
+input, processes, and project files.
 
 ## Requirements
 
 - Windows
 - Python 3.10 or newer
-- An OpenRouter API key or Google AI Studio API key
+- An OpenRouter or FreeLLM API key, or a Google AI Studio API key
 
 Install the Python dependencies:
 
@@ -22,10 +22,16 @@ provider you want to use:
 ```text
 AI_PROVIDER=openrouter
 OPENROUTER_API_KEY=your_openrouter_key
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 OPENROUTER_MODEL=liquid/lfm-2.5-2.6b:free
 ```
 
 `.env` is ignored by Git. Do not commit API keys.
+
+For a custom OpenAI-compatible router endpoint, set `OPENROUTER_BASE_URL` to
+that endpoint's API base URL. To use the FreeLLM unified API key, set
+`FREELLM_API_KEY`; it is used when `OPENROUTER_API_KEY` is not set. You can
+leave `OPENROUTER_API_KEY` unset when using the FreeLLM key.
 
 To use Gemini directly with a Google AI Studio API key instead:
 
@@ -100,7 +106,7 @@ their inputs/outputs; they do not test LLM agent orchestration.
 agent.py                 Entry point
 automation/
   agent.py               Provider-independent agent loop
-  providers.py           OpenRouter and Gemini API adapters
+  providers.py           OpenAI-compatible router and Gemini API adapters
   tools.py               Tool schemas, mapping, and dispatch
   windows.py             Window management
   input.py               Keyboard and mouse input

@@ -29,9 +29,10 @@ class OpenRouterSession:
         system_prompt: str,
         user_prompt: str,
         tools: list[dict[str, Any]],
+        base_url: str = "https://openrouter.ai/api/v1",
     ) -> None:
         self.client = OpenAI(
-            base_url="https://openrouter.ai/api/v1",
+            base_url=base_url,
             api_key=api_key,
         )
         self.model = model
@@ -154,13 +155,21 @@ def create_provider_session(
 ) -> OpenRouterSession | GeminiSession:
     provider = os.environ.get("AI_PROVIDER", "openrouter").strip().lower()
     if provider == "openrouter":
-        api_key = os.environ.get("OPENROUTER_API_KEY")
+        api_key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get(
+            "FREELLM_API_KEY"
+        )
         if not api_key:
             raise ValueError(
-                "OPENROUTER_API_KEY is required when AI_PROVIDER=openrouter"
+                "OPENROUTER_API_KEY or FREELLM_API_KEY is required "
+                "when AI_PROVIDER=openrouter"
             )
+        base_url = os.environ.get("OPENROUTER_BASE_URL", "").strip()
+        if not base_url:
+            base_url = "https://openrouter.ai/api/v1"
         model = os.environ.get("OPENROUTER_MODEL", "liquid/lfm-2.5-2.6b:free")
-        return OpenRouterSession(api_key, model, system_prompt, user_prompt, tools)
+        return OpenRouterSession(
+            api_key, model, system_prompt, user_prompt, tools, base_url=base_url
+        )
 
     if provider == "gemini":
         api_key = os.environ.get("GEMINI_API_KEY")

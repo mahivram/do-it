@@ -186,9 +186,24 @@ class AgentJobTests(unittest.TestCase):
     def test_runs_agent_and_exposes_tool_progress_without_provider_secrets(
         self, run_agent
     ):
-        def complete(_prompt, provider_config, confirmation_handler, on_tool_event):
-            on_tool_event({"name": "get_active_windows", "status": "running"})
-            on_tool_event({"name": "get_active_windows", "status": "completed"})
+        def complete(
+            _prompt,
+            provider_config,
+            confirmation_handler,
+            user_input_handler,
+            on_tool_event,
+        ):
+            on_tool_event(
+                {"id": 0, "name": "get_active_windows", "status": "running"}
+            )
+            on_tool_event(
+                {
+                    "id": 0,
+                    "name": "get_active_windows",
+                    "status": "completed",
+                    "result": [{"title": "Notepad"}],
+                }
+            )
             self.assertEqual(provider_config["api_key"], "private-key")
             return {"response": "There are no open windows.", "tools": []}
 
@@ -203,14 +218,25 @@ class AgentJobTests(unittest.TestCase):
         self.assertEqual(job["response"], "There are no open windows.")
         self.assertEqual(
             job["tools"],
-            [{"name": "get_active_windows", "status": "completed"}],
+            [
+                {
+                    "id": 0,
+                    "name": "get_active_windows",
+                    "status": "completed",
+                    "result": '[{"title": "Notepad"}]',
+                }
+            ],
         )
         self.assertNotIn("private-key", json.dumps(job))
 
     @patch("automation.web.run_agent_request")
     def test_waits_for_explicit_confirmation_and_resumes_agent(self, run_agent):
         def request_approval(
-            _prompt, provider_config, confirmation_handler, on_tool_event
+            _prompt,
+            provider_config,
+            confirmation_handler,
+            user_input_handler,
+            on_tool_event,
         ):
             approved = confirmation_handler("Restart Windows")
             return {"response": f"Approved: {approved}", "tools": []}
@@ -227,6 +253,38 @@ class AgentJobTests(unittest.TestCase):
         completed = self.wait_for_status(jobs, job_id, "completed")
         self.assertEqual(completed["response"], "Approved: False")
         self.assertFalse(jobs.confirm(job_id, confirmation_id, approved=True))
+
+    @patch("automation.web.run_agent_request")
+    def test_waits_for_user_choice_and_resumes_agent(self, run_agent):
+        def request_choice(
+            _prompt,
+            provider_config,
+            confirmation_handler,
+            user_input_handler,
+            on_tool_event,
+        ):
+            answer = user_input_handler(
+                "Which account should I use?",
+                ["Work account", "Personal account"],
+            )
+            return {"response": f"Selected {answer}.", "tools": []}
+
+        run_agent.side_effect = request_choice
+        jobs = AgentJobs()
+        job_id = jobs.create("Search using Chrome", {"provider": "gemini"})
+        pending = self.wait_for_status(jobs, job_id, "waiting_input")
+        interaction = pending["interaction"]
+        self.assertEqual(interaction["question"], "Which account should I use?")
+        self.assertEqual(interaction["options"], ["Work account", "Personal account"])
+
+        self.assertTrue(
+            jobs.submit_input(job_id, interaction["id"], "Personal account")
+        )
+        completed = self.wait_for_status(jobs, job_id, "completed")
+        self.assertEqual(completed["response"], "Selected Personal account.")
+        self.assertFalse(
+            jobs.submit_input(job_id, interaction["id"], "Work account")
+        )
 
 
 class LocalHttpApiTests(unittest.TestCase):
@@ -306,6 +364,27 @@ class LocalHttpApiTests(unittest.TestCase):
         self.assertEqual(response.status, 200)
         self.assertEqual(json.loads(response.read()), {"status": "decision_received"})
         confirm.assert_called_once_with("job-123", "approval-456", False)
+
+    @patch("automation.web.JOBS.submit_input", return_value=True)
+    def test_input_endpoint_forwards_answer(self, submit_input):
+        self.connection.request(
+            "POST",
+            "/api/jobs/job-123/input",
+            body=json.dumps({"interactionId": "question-456", "answer": "Work account"}),
+            headers={
+                "Content-Type": "application/json",
+                "Origin": f"http://127.0.0.1:{self.server.server_port}",
+            },
+        )
+        response = self.connection.getresponse()
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(json.loads(response.read()), {"status": "answer_received"})
+        submit_input.assert_called_once_with(
+            "job-123",
+            "question-456",
+            "Work account",
+        )
 
     def test_serves_built_frontend_and_spa_fallback(self):
         with tempfile.TemporaryDirectory() as temp_dir:

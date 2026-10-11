@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   answerConfirmation,
+  answerUserInput,
   getAgentJob,
   startAgentJob,
 } from "../src/agentApi.js";
@@ -72,6 +73,28 @@ test("posts explicit confirmation decisions to the local agent", async () => {
   assert.deepEqual(JSON.parse(requestOptions.body), {
     confirmationId: "confirm-1",
     approved: false,
+  });
+});
+
+test("posts the user's answer to a pending agent question", async () => {
+  let requestUrl;
+  let requestOptions;
+  await answerUserInput(
+    "job-1",
+    "interaction-1",
+    "Personal account",
+    async (url, options) => {
+      requestUrl = url;
+      requestOptions = options;
+      return jsonResponse(200, { status: "answer_received" });
+    },
+  );
+
+  assert.equal(requestUrl, "/api/jobs/job-1/input");
+  assert.equal(requestOptions.method, "POST");
+  assert.deepEqual(JSON.parse(requestOptions.body), {
+    interactionId: "interaction-1",
+    answer: "Personal account",
   });
 });
 

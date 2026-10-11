@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from automation.confirmations import ConfirmationHandler, use_confirmation_handler
+from automation.interactions import UserInputHandler, use_user_input_handler
 from automation.providers import create_provider_session
 from automation.tools import TOOLS, execute_tool_call
 
@@ -56,6 +57,23 @@ def _system_prompt(web_mode: bool = False) -> str:
     return (
         "You are a Windows Automation Agent. Use the provided tools to "
         "control the operating system based on the user's instructions. "
+        "Act on the live system, not a guessed or canned sequence. Ground every "
+        "claim in actual tool results. After each action, inspect the resulting "
+        "state before deciding or claiming the next step; report what was "
+        "observed, including errors or uncertainty. For browser tasks, use "
+        "get_active_windows and inspect_chrome_window to read the accessible "
+        "Chrome state, then click_chrome_control only for a uniquely observed "
+        "control. If an account or result choice is unclear, call ask_user with "
+        "the actual observed choices and wait for the user's answer. If the "
+        "screen content is not exposed to accessibility, say so and ask the "
+        "user to clarify or perform that step; do not pretend it succeeded. "
+        "If the user answers that they want to cancel or stop, do not take "
+        "further actions. "
+        "After typing or clicking, do not claim the page accepted it unless "
+        "a subsequent inspection confirms the result. Perform at most one "
+        "tool action from a tool-call batch; the other requested calls will "
+        "be returned as not run. Review the actual result, then request the "
+        "next action only when appropriate. "
         "File operations are restricted to the project directory. When "
         "listing the project directory, call manage_files with action "
         "'list' and path '.'. Always provide every required tool argument. "
@@ -77,10 +95,13 @@ def run_agent_request(
     provider_config: dict[str, str] | None = None,
     confirmation_handler: ConfirmationHandler | None = None,
     on_tool_event: Callable[[dict[str, Any]], None] | None = None,
+    user_input_handler: UserInputHandler | None = None,
 ) -> dict[str, Any]:
     """Run one agent request and return its response and tool activity."""
     session = create_provider_session(
-        _system_prompt(web_mode=confirmation_handler is not None),
+        _system_prompt(
+            web_mode=confirmation_handler is not None or user_input_handler is not None
+        ),
         user_prompt,
         TOOLS,
         provider_config=provider_config,
@@ -91,23 +112,45 @@ def run_agent_request(
         if confirmation_handler is not None
         else None
     )
+    user_input_context = (
+        use_user_input_handler(user_input_handler)
+        if user_input_handler is not None
+        else None
+    )
 
-    if confirmation_context is not None:
-        confirmation_context.__enter__()
     try:
+        if confirmation_context is not None:
+            confirmation_context.__enter__()
+        if user_input_context is not None:
+            user_input_context.__enter__()
         for _ in range(30):
             turn = session.next_turn()
             if not turn.tool_calls:
                 return {"response": turn.text or "", "tools": tool_events}
 
             results = []
-            for tool_call in turn.tool_calls:
+            for call_index, tool_call in enumerate(turn.tool_calls):
                 event = {
+                    "id": len(tool_events),
                     "name": tool_call.name,
                     "arguments": tool_call.arguments,
-                    "status": "running",
+                    "status": "running" if call_index == 0 else "skipped",
                 }
                 tool_events.append(event)
+                if call_index > 0:
+                    result = {
+                        "error": (
+                            "Not run: the agent performs one action at a time "
+                            "and must inspect the previous result first. "
+                            "Retry only if still needed."
+                        )
+                    }
+                    event["result"] = result
+                    if on_tool_event is not None:
+                        on_tool_event(dict(event))
+                    results.append(result)
+                    continue
+
                 if on_tool_event is not None:
                     on_tool_event(dict(event))
 
@@ -120,13 +163,19 @@ def run_agent_request(
                         on_tool_event(dict(event))
                     raise
 
-                event["status"] = "completed"
+                event["status"] = (
+                    "failed"
+                    if isinstance(result, dict) and "error" in result
+                    else "completed"
+                )
                 event["result"] = result
                 if on_tool_event is not None:
                     on_tool_event(dict(event))
                 results.append(result)
             session.add_tool_results(turn.tool_calls, results)
     finally:
+        if user_input_context is not None:
+            user_input_context.__exit__(None, None, None)
         if confirmation_context is not None:
             confirmation_context.__exit__(None, None, None)
 

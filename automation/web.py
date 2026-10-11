@@ -24,6 +24,7 @@ MAX_REQUEST_BYTES = 100_000
 MAX_PROMPT_LENGTH = 20_000
 MAX_JOBS = 50
 CONFIRMATION_TIMEOUT_SECONDS = 120
+USER_INPUT_TIMEOUT_SECONDS = 300
 ALLOWED_PROVIDERS = {"openrouter", "freellm", "gemini"}
 LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 RELOAD_POLL_SECONDS = 0.5
@@ -137,8 +138,11 @@ class AgentJobs:
             "error": None,
             "tools": [],
             "confirmation": None,
+            "interaction": None,
             "_condition": threading.Condition(self._lock),
             "_confirmation_result": None,
+            "_interaction_result": None,
+            "_interaction_submitted": False,
             "_created_at": time.monotonic(),
         }
         with self._lock:
@@ -172,6 +176,21 @@ class AgentJobs:
             job["_condition"].notify_all()
             return True
 
+    def submit_input(self, job_id: str, interaction_id: str, answer: str) -> bool:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            interaction = job.get("interaction") if job else None
+            if (
+                interaction is None
+                or interaction["id"] != interaction_id
+                or job["_interaction_submitted"]
+            ):
+                return False
+            job["_interaction_result"] = answer
+            job["_interaction_submitted"] = True
+            job["_condition"].notify_all()
+            return True
+
     def _run(
         self, job_id: str, prompt: str, provider_config: dict[str, str]
     ) -> None:
@@ -186,6 +205,9 @@ class AgentJobs:
                     confirmation_handler=lambda description: self._request_confirmation(
                         job_id, description
                     ),
+                    user_input_handler=lambda question, options: self._request_user_input(
+                        job_id, question, options
+                    ),
                     on_tool_event=lambda event: self._record_tool_event(job_id, event),
                 )
             except Exception as exc:
@@ -197,10 +219,6 @@ class AgentJobs:
                 with self._lock:
                     job["status"] = "completed"
                     job["response"] = result["response"]
-                    job["tools"] = [
-                        {"name": event["name"], "status": event["status"]}
-                        for event in job["tools"]
-                    ]
             finally:
                 with self._lock:
                     job["_condition"].notify_all()
@@ -208,12 +226,20 @@ class AgentJobs:
     def _record_tool_event(self, job_id: str, event: dict[str, Any]) -> None:
         with self._lock:
             job = self._jobs[job_id]
-            tool_event = {
+            tool_event: dict[str, Any] = {
+                "id": event["id"],
                 "name": event["name"],
                 "status": event["status"],
             }
+            if "result" in event:
+                result = json.dumps(event["result"], ensure_ascii=False, default=str)
+                tool_event["result"] = (
+                    result
+                    if len(result) <= 4000
+                    else result[:4000] + "… (truncated)"
+                )
             for index, existing in enumerate(job["tools"]):
-                if existing["name"] == event["name"] and existing["status"] == "running":
+                if existing["id"] == event["id"]:
                     job["tools"][index] = tool_event
                     break
             else:
@@ -243,6 +269,34 @@ class AgentJobs:
             job["status"] = "running"
             return approved
 
+    def _request_user_input(
+        self, job_id: str, question: str, options: list[str] | None
+    ) -> str | None:
+        with self._lock:
+            job = self._jobs[job_id]
+            interaction_id = uuid.uuid4().hex
+            job["interaction"] = {
+                "id": interaction_id,
+                "question": question,
+                "options": options,
+            }
+            job["_interaction_result"] = None
+            job["_interaction_submitted"] = False
+            job["status"] = "waiting_input"
+            deadline = time.monotonic() + USER_INPUT_TIMEOUT_SECONDS
+            while not job["_interaction_submitted"]:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                job["_condition"].wait(remaining)
+
+            answer = job["_interaction_result"]
+            job["_interaction_result"] = None
+            job["_interaction_submitted"] = False
+            job["interaction"] = None
+            job["status"] = "running"
+            return answer
+
     def _public_job(self, job: dict[str, Any]) -> dict[str, Any]:
         return {
             "id": job["id"],
@@ -251,6 +305,7 @@ class AgentJobs:
             "error": job["error"],
             "tools": list(job["tools"]),
             "confirmation": job["confirmation"],
+            "interaction": job["interaction"],
         }
 
     def _prune(self) -> None:
@@ -364,6 +419,27 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                     self._send_json(409, {"error": "This confirmation is no longer pending."})
                     return
                 self._send_json(200, {"status": "decision_received"})
+                return
+
+            if (
+                len(parts) == 4
+                and parts[0] == "api"
+                and parts[1] == "jobs"
+                and parts[3] == "input"
+            ):
+                interaction_id = data.get("interactionId") if isinstance(data, dict) else None
+                answer = data.get("answer") if isinstance(data, dict) else None
+                if (
+                    not isinstance(interaction_id, str)
+                    or not isinstance(answer, str)
+                    or not answer.strip()
+                    or len(answer) > 2000
+                ):
+                    raise ValueError("A pending input ID and a non-empty answer are required.")
+                if not JOBS.submit_input(parts[2], interaction_id, answer.strip()):
+                    self._send_json(409, {"error": "This question is no longer pending."})
+                    return
+                self._send_json(200, {"status": "answer_received"})
                 return
 
             self._send_json(404, {"error": "API route not found."})

@@ -51,6 +51,24 @@ class ToolDispatchTests(unittest.TestCase):
                     {"error": "Tool test_error failed: failed"},
                 )
 
+    def test_focus_failure_is_returned_to_agent_as_actionable_tool_error(self):
+        with patch(
+            "automation.windows.win32gui.SetForegroundWindow",
+            side_effect=OSError("foreground activation denied"),
+        ):
+            result = execute_tool_call("focus_and_bring_to_front", '{"hwnd":123}')
+
+        self.assertEqual(
+            result,
+            {
+                "error": (
+                    "Tool focus_and_bring_to_front failed: Windows refused to "
+                    "bring this window to the foreground. Click the window "
+                    "manually or retry after it is available."
+                )
+            },
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

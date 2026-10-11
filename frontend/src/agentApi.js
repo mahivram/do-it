@@ -41,3 +41,20 @@ export async function answerConfirmation(
   );
   return readJson(response);
 }
+
+export async function answerUserInput(
+  jobId,
+  interactionId,
+  answer,
+  fetchImpl = fetch,
+) {
+  const response = await fetchImpl(
+    `/api/jobs/${encodeURIComponent(jobId)}/input`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ interactionId, answer }),
+    },
+  );
+  return readJson(response);
+}

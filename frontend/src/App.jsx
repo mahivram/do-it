@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { loadLocalValue, saveLocalValue } from "./storage.js";
 import {
   answerConfirmation,
+  answerUserInput,
   getAgentJob,
   startAgentJob,
 } from "./agentApi.js";
@@ -140,6 +141,8 @@ export default function App() {
   const [storageError, setStorageError] = useState(initialData.error);
   const [activeJob, setActiveJob] = useState(null);
   const [confirmationPending, setConfirmationPending] = useState(false);
+  const [interactionAnswer, setInteractionAnswer] = useState("");
+  const [interactionPending, setInteractionPending] = useState(false);
   const [showKey, setShowKey] = useState(false);
   const [copiedEntryId, setCopiedEntryId] = useState(null);
   const promptInput = useRef(null);
@@ -217,7 +220,7 @@ export default function App() {
         response: job.response,
         provider: settings.provider,
         model: settings.provider === "freellm" ? "auto" : config.model,
-        tools: job.tools,
+        tools: job.tools.map(({ name, status }) => ({ name, status })),
         createdAt: new Date().toISOString(),
       };
       setHistory((current) => [entry, ...current].slice(0, 20));
@@ -228,6 +231,8 @@ export default function App() {
     } finally {
       setLoading(false);
       setConfirmationPending(false);
+      setInteractionPending(false);
+      setInteractionAnswer("");
       setActiveJob(null);
     }
   }
@@ -235,6 +240,29 @@ export default function App() {
   async function handleConfirmation(approved) {
     if (!activeJob?.confirmation || confirmationPending) {
       return;
+    }
+
+    async function handleUserInput(answer) {
+      if (!activeJob?.interaction || interactionPending || !answer.trim()) {
+        return;
+      }
+      setInteractionPending(true);
+      try {
+        await answerUserInput(
+          activeJob.id,
+          activeJob.interaction.id,
+          answer.trim(),
+        );
+        setInteractionAnswer("");
+      } catch (inputError) {
+        setError(
+          inputError instanceof Error
+            ? inputError.message
+            : "Could not send your answer to the agent.",
+        );
+      } finally {
+        setInteractionPending(false);
+      }
     }
     setConfirmationPending(true);
     try {
@@ -543,12 +571,18 @@ export default function App() {
               <div className="agent-progress" aria-live="polite">
                 <div className="agent-progress-heading">
                   <span className="agent-progress-indicator">
-                    {activeJob.status === "waiting_confirmation" ? "!" : <span className="spinner" />}
+                    {activeJob.status === "waiting_confirmation"
+                      ? "!"
+                      : activeJob.status === "waiting_input"
+                        ? "?"
+                        : <span className="spinner" />}
                   </span>
                   <span>
                     <strong>
                       {activeJob.status === "waiting_confirmation"
                         ? "Your approval is needed"
+                        : activeJob.status === "waiting_input"
+                          ? "The agent needs your choice"
                         : activeJob.status === "queued"
                           ? "Waiting for the agent"
                           : "Python agent is working"}
@@ -559,13 +593,61 @@ export default function App() {
                 {activeJob.tools?.length > 0 && (
                   <ul className="tool-activity">
                     {activeJob.tools.map((tool, index) => (
-                      <li key={`${tool.name}-${index}`}>
-                        <span className={`tool-status ${tool.status}`} />
-                        <span>{tool.name.replaceAll("_", " ")}</span>
-                        <span className="tool-status-label">{tool.status}</span>
+                      <li key={tool.id ?? `${tool.name}-${index}`}>
+                        <div className="tool-activity-heading">
+                          <span className={`tool-status ${tool.status}`} />
+                          <span>{tool.name.replaceAll("_", " ")}</span>
+                          <span className="tool-status-label">{tool.status}</span>
+                        </div>
+                        {tool.result && (
+                          <pre className="tool-result">{tool.result}</pre>
+                        )}
                       </li>
                     ))}
                   </ul>
+                )}
+                {activeJob.interaction && (
+                  <div className="interaction-card">
+                    <div className="interaction-copy">
+                      <strong>{activeJob.interaction.question}</strong>
+                      <span>Select one of the observed choices, or enter a different answer.</span>
+                    </div>
+                    {activeJob.interaction.options?.length > 0 && (
+                      <div className="interaction-options">
+                        {activeJob.interaction.options.map((option) => (
+                          <button
+                            key={option}
+                            type="button"
+                            disabled={interactionPending}
+                            onClick={() => handleUserInput(option)}
+                          >
+                            {option}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <form
+                      className="interaction-answer"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        handleUserInput(interactionAnswer);
+                      }}
+                    >
+                      <input
+                        aria-label="Answer the agent's question"
+                        value={interactionAnswer}
+                        maxLength={2000}
+                        onChange={(event) => setInteractionAnswer(event.target.value)}
+                        placeholder="Type your answer..."
+                      />
+                      <button
+                        type="submit"
+                        disabled={interactionPending || !interactionAnswer.trim()}
+                      >
+                        {interactionPending ? "Sending..." : "Answer"}
+                      </button>
+                    </form>
+                  </div>
                 )}
                 {activeJob.confirmation && (
                   <div className="confirmation-card">

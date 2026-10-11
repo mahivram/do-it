@@ -83,6 +83,15 @@ browser's local storage. The API key is not encrypted there and is sent to the
 loopback Python server, which uses it to contact the selected provider. The
 server binds only to `127.0.0.1`.
 
+For browser tasks, the agent can inspect the visible Chrome window through
+Windows accessibility, report the controls it actually sees, and click a
+uniquely named observed control. If it encounters multiple account choices, it
+can pause and ask you which observed option to use. Tool results are shown live
+while the agent decides what to do next. Chrome exposes only the page
+information its accessibility tree makes available; when the page does not
+expose enough information, the agent must report that limitation rather than
+claiming a step succeeded.
+
 For frontend development, run `python web.py --reload` in one terminal and
 `npm --prefix frontend run dev` in another; Vite proxies `/api` requests to
 the local Python agent. The Python server restarts when project `.py` files
@@ -118,6 +127,10 @@ their inputs/outputs; they do not test LLM agent orchestration.
   named keys with modifiers, move the pointer, click, and scroll. Text input
   reports sent keyboard events; it cannot verify what the target application
   ultimately displays.
+- **Chrome:** inspect controls exposed by the visible Chrome window's Windows
+  accessibility tree and click a unique observed control. The agent can ask
+  you to choose when it sees multiple accounts or results; page content that
+  Chrome does not expose cannot be verified automatically.
 - **Processes:** `kill_process(pid)` force-terminates a process and its child
   processes. This cannot be undone; only request it when you intend to stop that
   process. The agent itself cannot terminate itself.

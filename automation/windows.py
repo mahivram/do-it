@@ -40,7 +40,13 @@ def focus_and_bring_to_front(hwnd: int) -> str:
 
     show_command = win32con.SW_RESTORE if win32gui.IsIconic(hwnd) else win32con.SW_SHOW
     win32gui.ShowWindow(hwnd, show_command)
-    win32gui.SetForegroundWindow(hwnd)
+    try:
+        win32gui.SetForegroundWindow(hwnd)
+    except Exception as exc:
+        raise RuntimeError(
+            "Windows refused to bring this window to the foreground. "
+            "Click the window manually or retry after it is available."
+        ) from exc
     return f"Successfully set focus to window handle {hwnd}"
 
 

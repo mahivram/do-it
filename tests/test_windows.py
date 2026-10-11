@@ -37,6 +37,17 @@ class WindowTests(unittest.TestCase):
     def test_focus_window_rejects_invalid_handle(self):
         self.assertEqual(windows.focus_and_bring_to_front(999), "Error: Invalid HWND 999")
 
+    def test_focus_window_reports_when_windows_refuses_foreground_activation(self):
+        with patch.object(
+            win32gui,
+            "SetForegroundWindow",
+            side_effect=OSError("foreground activation denied"),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "Windows refused to bring this window"
+            ):
+                windows.focus_and_bring_to_front(123)
+
     def test_get_active_windows_excludes_empty_titles(self):
         self.assertEqual(windows.get_active_windows(), [{"hwnd": 123, "title": "Example window"}])
 

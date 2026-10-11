@@ -8,8 +8,10 @@ from apps.telegram.desktop import (
     search_chats,
     send_message,
 )
+from apps.chrome.desktop import click_chrome_control, inspect_chrome_window
 from automation.dependencies import manage_project_dependencies
 from automation.files import manage_files
+from automation.interactions import request_user_input
 from automation.input import (
     click_mouse,
     move_mouse,
@@ -39,6 +41,71 @@ from automation.windows import (
 
 
 TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "ask_user",
+            "description": (
+                "Pause the task and ask the user a question through the active "
+                "interface. Use when a live screen presents multiple plausible "
+                "accounts, search results, or other choices. Supply the choices "
+                "you actually observed when available; wait for the answer "
+                "before taking the next action."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string", "minLength": 1, "maxLength": 1000},
+                    "options": {
+                        "type": "array",
+                        "items": {"type": "string", "minLength": 1, "maxLength": 300},
+                        "minItems": 2,
+                        "maxItems": 10,
+                        "uniqueItems": True,
+                    },
+                },
+                "required": ["question"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "inspect_chrome_window",
+            "description": (
+                "Read the currently accessible Chrome window controls for a "
+                "specific visible window handle. Use get_active_windows first "
+                "to get the HWND, and inspect again after each browser action. "
+                "Returns only information exposed by Windows accessibility; "
+                "never assume page content that is not returned."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"hwnd": {"type": "integer"}},
+                "required": ["hwnd"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "click_chrome_control",
+            "description": (
+                "Click one uniquely named, visible control in Chrome using "
+                "Windows accessibility. Inspect the Chrome window first; "
+                "if a requested control is missing or ambiguous, ask the user "
+                "or report the limitation instead of guessing."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "hwnd": {"type": "integer"},
+                    "name": {"type": "string", "minLength": 1, "maxLength": 300},
+                },
+                "required": ["hwnd", "name"],
+            },
+        },
+    },
     {
         "type": "function",
         "function": {
@@ -425,7 +492,23 @@ TOOLS = [
     },
 ]
 
+def ask_user(question: str, options: list[str] | None = None) -> str | None:
+    if not question.strip() or len(question) > 1000:
+        raise ValueError("Question must contain 1 to 1000 characters.")
+    if options is not None and (
+        not isinstance(options, list)
+        or not 2 <= len(options) <= 10
+        or any(not isinstance(option, str) or not option.strip() or len(option) > 300 for option in options)
+        or len({option.casefold() for option in options}) != len(options)
+    ):
+        raise ValueError("Provide 2 to 10 unique, non-empty options of at most 300 characters.")
+    return request_user_input(question, options)
+
+
 TOOL_MAP = {
+    "ask_user": ask_user,
+    "inspect_chrome_window": inspect_chrome_window,
+    "click_chrome_control": click_chrome_control,
     "manage_project_dependencies": manage_project_dependencies,
     "telegram_open": open_telegram,
     "telegram_search_chats": search_chats,

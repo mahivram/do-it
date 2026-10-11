@@ -9,6 +9,10 @@ from apps.telegram.desktop import (
     send_message,
 )
 from apps.chrome.desktop import click_chrome_control, inspect_chrome_window
+from automation.accessibility import (
+    click_accessible_control,
+    inspect_accessible_window,
+)
 from automation.dependencies import manage_project_dependencies
 from automation.files import manage_files
 from automation.interactions import request_user_input
@@ -65,6 +69,43 @@ TOOLS = [
                     },
                 },
                 "required": ["question"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "inspect_accessible_window",
+            "description": (
+                "Inspect visible controls exposed by Windows UI Automation in "
+                "any application window, including Electron apps such as Unity "
+                "Hub. Use get_active_windows first to get the HWND and inspect "
+                "again after each action. This reports only accessible controls."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"hwnd": {"type": "integer"}},
+                "required": ["hwnd"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "click_accessible_control",
+            "description": (
+                "Click one uniquely named, visible, enabled control in any "
+                "application window using Windows UI Automation. Inspect the "
+                "window first; if the control is absent or ambiguous, do not "
+                "guess or use coordinates."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "hwnd": {"type": "integer"},
+                    "name": {"type": "string", "minLength": 1, "maxLength": 300},
+                },
+                "required": ["hwnd", "name"],
             },
         },
     },
@@ -507,6 +548,8 @@ def ask_user(question: str, options: list[str] | None = None) -> str | None:
 
 TOOL_MAP = {
     "ask_user": ask_user,
+    "inspect_accessible_window": inspect_accessible_window,
+    "click_accessible_control": click_accessible_control,
     "inspect_chrome_window": inspect_chrome_window,
     "click_chrome_control": click_chrome_control,
     "manage_project_dependencies": manage_project_dependencies,

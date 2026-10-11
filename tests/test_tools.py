@@ -11,6 +11,8 @@ class ToolDispatchTests(unittest.TestCase):
         self.assertEqual(schema_names, set(TOOL_MAP))
         self.assertEqual(schema_names, set(TOOL_SCHEMAS))
         self.assertNotIn("telegram_list_chats", schema_names)
+        self.assertIn("inspect_accessible_window", schema_names)
+        self.assertIn("click_accessible_control", schema_names)
 
     def test_telegram_message_requires_a_named_target(self):
         self.assertIn(

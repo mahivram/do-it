@@ -71,6 +71,14 @@ def _system_prompt(web_mode: bool = False) -> str:
         "the actual observed choices and wait for the user's answer. If the "
         "screen content is not exposed to accessibility, say so and ask the "
         "user to clarify or perform that step; do not pretend it succeeded. "
+        "For other desktop applications, including Electron apps such as Unity "
+        "Hub, use get_active_windows and inspect_accessible_window; do not "
+        "assume they are inaccessible just because they are Electron apps. "
+        "Use click_accessible_control only for a uniquely observed control, "
+        "then inspect again. If required controls are not exposed, report that "
+        "specific limitation instead of giving generic instructions or "
+        "claiming the task was completed. Ask the user for required choices "
+        "such as project template, name, or location rather than inventing them. "
         "If the user answers that they want to cancel or stop, do not take "
         "further actions. "
         "After typing or clicking, do not claim the page accepted it unless "
@@ -133,7 +141,7 @@ def run_agent_request(
             confirmation_context.__enter__()
         if user_input_context is not None:
             user_input_context.__enter__()
-        for _ in range(30):
+        while True:
             raise_if_cancelled()
             turn = session.next_turn()
             raise_if_cancelled()
@@ -193,8 +201,6 @@ def run_agent_request(
             user_input_context.__exit__(None, None, None)
         if confirmation_context is not None:
             confirmation_context.__exit__(None, None, None)
-
-    raise RuntimeError("Agent exceeded the 30-turn tool-call limit")
 
 
 def run_agent(user_prompt: str) -> None:

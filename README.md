@@ -131,6 +131,10 @@ their inputs/outputs; they do not test LLM agent orchestration.
   accessibility tree and click a unique observed control. The agent can ask
   you to choose when it sees multiple accounts or results; page content that
   Chrome does not expose cannot be verified automatically.
+- **Other desktop apps:** inspect controls exposed by any visible Windows UI
+  Automation window, including Electron applications such as Unity Hub, and
+  click a uniquely named visible control. If the app does not expose a required
+  control, the agent reports that limitation rather than claiming success.
 - **Processes:** `kill_process(pid)` force-terminates a process and its child
   processes. This cannot be undone; only request it when you intend to stop that
   process. The agent itself cannot terminate itself.

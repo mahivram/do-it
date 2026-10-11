@@ -12,6 +12,8 @@ class AgentBehaviorTests(unittest.TestCase):
 
         self.assertIn("Ground every claim in actual tool results", prompt)
         self.assertIn("inspect_chrome_window", prompt)
+        self.assertIn("inspect_accessible_window", prompt)
+        self.assertIn("Unity Hub", prompt)
         self.assertIn("ask_user", prompt)
         self.assertIn("do not pretend it succeeded", prompt)
 
@@ -115,6 +117,32 @@ class AgentBehaviorTests(unittest.TestCase):
             ],
         )
         self.assertIn("inspect", result["response"])
+
+    @patch("automation.agent.execute_tool_call", return_value="Action finished")
+    @patch("automation.agent.create_provider_session")
+    def test_long_tasks_can_continue_past_thirty_tool_turns(
+        self, create_session, execute_tool
+    ):
+        session = Mock()
+        tool_turns = [
+            ProviderTurn(
+                text=None,
+                tool_calls=[ToolInvocation("get_active_windows", "{}")],
+            )
+            for _ in range(35)
+        ]
+        session.next_turn.side_effect = [
+            *tool_turns,
+            ProviderTurn(text="The task is complete.", tool_calls=[]),
+        ]
+        create_session.return_value = session
+
+        result = run_agent_request("Complete a long task")
+
+        self.assertEqual(result["response"], "The task is complete.")
+        self.assertEqual(len(result["tools"]), 35)
+        self.assertEqual(execute_tool.call_count, 35)
+        self.assertEqual(session.next_turn.call_count, 36)
 
 
 if __name__ == "__main__":

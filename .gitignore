@@ -1,3 +1,5 @@
 .env
 __pycache__/
 .coverage
+frontend/node_modules/
+frontend/dist/

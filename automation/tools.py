@@ -46,8 +46,9 @@ TOOLS = [
             "description": (
                 "Check this project's required Python packages or install them "
                 "from requirements.txt into the Python interpreter currently "
-                "running the agent. Installation requires the user to type yes "
-                "in the terminal. Use when a tool reports a missing dependency."
+                "running the agent. Installation requires explicit user "
+                "confirmation in the active interface. Use when a tool reports "
+                "a missing dependency."
             ),
             "parameters": {
                 "type": "object",
@@ -108,7 +109,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "telegram_send_message",
-            "description": "Search for and open the specified Telegram person, group, or channel, then send only after the user types yes in the terminal.",
+            "description": "Search for and open the specified Telegram person, group, or channel, then send only after the user explicitly confirms in the active interface.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -158,7 +159,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "manage_power",
-            "description": "Shutdown, restart, sleep, hibernate, or lock Windows. Requires direct confirmation in the user's terminal.",
+            "description": "Shutdown, restart, sleep, hibernate, or lock Windows. Requires direct user confirmation in the active interface.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -175,7 +176,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "create_system_restore_point",
-            "description": "Create a Windows system restore point after direct terminal confirmation. May require administrator privileges and System Protection to be enabled.",
+            "description": "Create a Windows system restore point after direct user confirmation in the active interface. May require administrator privileges and System Protection to be enabled.",
             "parameters": {
                 "type": "object",
                 "properties": {"description": {"type": "string"}},
@@ -187,7 +188,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "manage_windows_updates",
-            "description": "List available Windows Updates, or install/hide a specific update by its update_id. Install and hide require direct terminal confirmation.",
+            "description": "List available Windows Updates, or install/hide a specific update by its update_id. Install and hide require direct user confirmation in the active interface.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -208,7 +209,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "manage_windows_features",
-            "description": "List Windows optional features, or enable/disable a feature. Changes require direct terminal confirmation and administrator privileges.",
+            "description": "List Windows optional features, or enable/disable a feature. Changes require direct user confirmation in the active interface and administrator privileges.",
             "parameters": {
                 "type": "object",
                 "properties": {

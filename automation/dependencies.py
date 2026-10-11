@@ -6,6 +6,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from automation.confirmations import request_confirmation
+
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 REQUIREMENTS_FILE = PROJECT_ROOT / "requirements.txt"
@@ -30,7 +32,7 @@ def check_project_dependencies() -> list[dict[str, Any]]:
 
 
 def manage_project_dependencies(action: str) -> dict[str, Any]:
-    """Check dependencies or install requirements.txt after terminal confirmation."""
+    """Check dependencies or install requirements.txt after user confirmation."""
     if action == "check":
         dependencies = check_project_dependencies()
         return {
@@ -44,15 +46,11 @@ def manage_project_dependencies(action: str) -> dict[str, Any]:
     if not REQUIREMENTS_FILE.is_file():
         raise FileNotFoundError(f"Project requirements file not found: {REQUIREMENTS_FILE}")
 
-    try:
-        answer = input(
-            "Install this project's dependencies into the currently running "
-            f"Python ({sys.executable}) from {REQUIREMENTS_FILE.name}? "
-            "Type 'yes' to confirm: "
-        )
-    except EOFError:
-        answer = ""
-    if answer.strip().lower() != "yes":
+    if not request_confirmation(
+        "Install this project's dependencies into the currently running "
+        f"Python ({sys.executable}) from {REQUIREMENTS_FILE.name}",
+        input,
+    ):
         return {"status": "cancelled", "python": sys.executable}
 
     result = subprocess.run(

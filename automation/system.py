@@ -9,6 +9,8 @@ import subprocess
 from datetime import datetime, timezone
 from typing import Any
 
+from automation.confirmations import request_confirmation
+
 
 _SENSITIVE_ENV_PATTERN = re.compile(
     r"(^|[_-])(?:KEY|AUTH|CREDENTIALS?|PASS(?:WORD|WD)?|SECRET|TOKEN|"
@@ -117,18 +119,12 @@ def list_environment_variables() -> dict[str, str]:
 
 
 def _confirm_system_action(action_description: str) -> bool:
-    """Require a direct human confirmation in the running terminal."""
-    try:
-        answer = input(
-            f"{action_description}. Type 'yes' to confirm (anything else cancels): "
-        )
-    except EOFError:
-        return False
-    return answer.strip().lower() == "yes"
+    """Require direct human confirmation in the active interface."""
+    return request_confirmation(action_description, input)
 
 
 def manage_power(action: str) -> str:
-    """Perform a power action only after explicit terminal confirmation."""
+    """Perform a power action only after explicit user confirmation."""
     commands = {
         "shutdown": ["shutdown.exe", "/s", "/t", "0"],
         "restart": ["shutdown.exe", "/r", "/t", "0"],

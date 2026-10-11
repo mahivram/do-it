@@ -40,6 +40,84 @@ class ProviderConfigurationTests(unittest.TestCase):
         client_factory.assert_called_once_with(api_key="test-key")
         self.assertEqual(session.model, "gemini-test")
 
+    @patch.dict(os.environ, {}, clear=True)
+    @patch("google.genai.Client")
+    def test_accepts_explicit_gemini_settings_from_local_ui(self, client_factory):
+        session = create_provider_session(
+            "system",
+            "user",
+            TOOLS,
+            provider_config={
+                "provider": "gemini",
+                "api_key": "browser-key",
+                "model": "gemini-from-ui",
+            },
+        )
+
+        self.assertIsInstance(session, GeminiSession)
+        self.assertEqual(session.model, "gemini-from-ui")
+        client_factory.assert_called_once_with(api_key="browser-key")
+
+    @patch.dict(os.environ, {}, clear=True)
+    @patch("automation.providers.OpenAI")
+    def test_accepts_explicit_openrouter_settings_from_local_ui(self, client_factory):
+        session = create_provider_session(
+            "system",
+            "user",
+            TOOLS,
+            provider_config={
+                "provider": "openrouter",
+                "api_key": "browser-key",
+                "model": "model-from-ui",
+                "base_url": "https://router.example/v1",
+            },
+        )
+
+        self.assertIsInstance(session, OpenRouterSession)
+        self.assertEqual(session.model, "model-from-ui")
+        client_factory.assert_called_once_with(
+            base_url="https://router.example/v1",
+            api_key="browser-key",
+        )
+
+    @patch.dict(os.environ, {}, clear=True)
+    @patch("automation.providers.OpenAI")
+    def test_freellm_uses_auto_model_and_its_local_default(self, client_factory):
+        session = create_provider_session(
+            "system",
+            "user",
+            TOOLS,
+            provider_config={
+                "provider": "freellm",
+                "api_key": "unified-key",
+            },
+        )
+
+        self.assertIsInstance(session, OpenRouterSession)
+        self.assertEqual(session.model, "auto")
+        client_factory.assert_called_once_with(
+            base_url="http://127.0.0.1:31415/v1",
+            api_key="unified-key",
+        )
+
+    @patch.dict(os.environ, {"GEMINI_API_KEY": "env-key"}, clear=True)
+    @patch("google.genai.Client")
+    def test_falls_back_to_project_environment_key_when_ui_key_is_empty(
+        self, client_factory
+    ):
+        session = create_provider_session(
+            "system",
+            "user",
+            TOOLS,
+            provider_config={
+                "provider": "gemini",
+                "api_key": "",
+                "model": "gemini-from-ui",
+            },
+        )
+        self.assertIsInstance(session, GeminiSession)
+        client_factory.assert_called_once_with(api_key="env-key")
+
     @patch.dict(os.environ, {"AI_PROVIDER": "openrouter", "OPENROUTER_API_KEY": "test-key"})
     @patch("automation.providers.OpenAI")
     def test_selects_openrouter_with_configured_model(self, client_factory):

@@ -152,32 +152,56 @@ def create_provider_session(
     system_prompt: str,
     user_prompt: str,
     tools: list[dict[str, Any]],
+    provider_config: dict[str, str] | None = None,
 ) -> OpenRouterSession | GeminiSession:
-    provider = os.environ.get("AI_PROVIDER", "openrouter").strip().lower()
-    if provider == "openrouter":
-        api_key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get(
-            "FREELLM_API_KEY"
-        )
+    config = provider_config or {}
+    provider = config.get("provider", os.environ.get("AI_PROVIDER", "openrouter"))
+    provider = provider.strip().lower()
+    if provider in {"openrouter", "freellm"}:
+        api_key = config.get("api_key") or os.environ.get("OPENROUTER_API_KEY")
+        if provider == "freellm":
+            api_key = config.get("api_key") or os.environ.get("FREELLM_API_KEY")
+        elif not api_key:
+            api_key = os.environ.get("FREELLM_API_KEY")
         if not api_key:
-            raise ValueError(
-                "OPENROUTER_API_KEY or FREELLM_API_KEY is required "
-                "when AI_PROVIDER=openrouter"
+            required_keys = (
+                "FREELLM_API_KEY"
+                if provider == "freellm"
+                else "OPENROUTER_API_KEY or FREELLM_API_KEY"
             )
-        base_url = os.environ.get("OPENROUTER_BASE_URL", "").strip()
+            raise ValueError(
+                f"An API key is required when provider={provider}; "
+                f"set {required_keys} or enter a key in the app."
+            )
+        base_url = config.get("base_url", "").strip()
         if not base_url:
-            base_url = "https://openrouter.ai/api/v1"
-        model = os.environ.get("OPENROUTER_MODEL", "liquid/lfm-2.5-2.6b:free")
+            base_url = os.environ.get("OPENROUTER_BASE_URL", "").strip()
+        if not base_url:
+            base_url = (
+                "http://127.0.0.1:31415/v1"
+                if provider == "freellm"
+                else "https://openrouter.ai/api/v1"
+            )
+        model = (
+            "auto"
+            if provider == "freellm"
+            else config.get("model")
+            or os.environ.get("OPENROUTER_MODEL", "liquid/lfm-2.5-2.6b:free")
+        )
         return OpenRouterSession(
             api_key, model, system_prompt, user_prompt, tools, base_url=base_url
         )
 
     if provider == "gemini":
-        api_key = os.environ.get("GEMINI_API_KEY")
+        api_key = config.get("api_key") or os.environ.get("GEMINI_API_KEY")
         if not api_key:
-            raise ValueError("GEMINI_API_KEY is required when AI_PROVIDER=gemini")
-        model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+            raise ValueError(
+                "An API key is required when provider=gemini; "
+                "set GEMINI_API_KEY or enter a key in the app."
+            )
+        model = config.get("model") or os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
         return GeminiSession(api_key, model, system_prompt, user_prompt, tools)
 
     raise ValueError(
-        f"Unsupported AI_PROVIDER {provider!r}; choose 'openrouter' or 'gemini'"
+        f"Unsupported AI_PROVIDER {provider!r}; choose 'openrouter', 'freellm', or 'gemini'"
     )

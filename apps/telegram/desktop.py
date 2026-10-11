@@ -7,6 +7,7 @@ import subprocess
 import time
 from typing import Any
 
+from automation.confirmations import request_confirmation
 from automation.input import press_key, type_text
 
 
@@ -266,14 +267,10 @@ def send_message(chat_name: str, text: str) -> str:
             "Multiple text inputs are visible; close search and select one chat first"
         )
 
-    try:
-        answer = input(
-            f"Send this message to Telegram chat {opened_chat_name!r}? "
-            "Type 'yes' to confirm: "
-        )
-    except EOFError:
-        answer = ""
-    if answer.strip().lower() != "yes":
+    if not request_confirmation(
+        f"Send this message to Telegram chat {opened_chat_name!r}",
+        input,
+    ):
         return "Cancelled Telegram message send"
 
     edits[0].click_input()

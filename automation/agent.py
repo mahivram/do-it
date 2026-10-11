@@ -8,6 +8,10 @@ from automation.providers import create_provider_session
 from automation.tools import TOOLS, execute_tool_call
 
 
+class AgentCancelled(Exception):
+    """Raised when the active request has been cancelled by the user."""
+
+
 def _load_env_file() -> None:
     env_file = Path(__file__).resolve().parent.parent / ".env"
     if not env_file.exists():
@@ -96,8 +100,14 @@ def run_agent_request(
     confirmation_handler: ConfirmationHandler | None = None,
     on_tool_event: Callable[[dict[str, Any]], None] | None = None,
     user_input_handler: UserInputHandler | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Run one agent request and return its response and tool activity."""
+    def raise_if_cancelled() -> None:
+        if cancel_check is not None and cancel_check():
+            raise AgentCancelled("Agent task was stopped by the user.")
+
+    raise_if_cancelled()
     session = create_provider_session(
         _system_prompt(
             web_mode=confirmation_handler is not None or user_input_handler is not None
@@ -124,12 +134,15 @@ def run_agent_request(
         if user_input_context is not None:
             user_input_context.__enter__()
         for _ in range(30):
+            raise_if_cancelled()
             turn = session.next_turn()
+            raise_if_cancelled()
             if not turn.tool_calls:
                 return {"response": turn.text or "", "tools": tool_events}
 
             results = []
             for call_index, tool_call in enumerate(turn.tool_calls):
+                raise_if_cancelled()
                 event = {
                     "id": len(tool_events),
                     "name": tool_call.name,
@@ -154,6 +167,7 @@ def run_agent_request(
                 if on_tool_event is not None:
                     on_tool_event(dict(event))
 
+                raise_if_cancelled()
                 try:
                     result = execute_tool_call(tool_call.name, tool_call.arguments)
                 except Exception as exc:
@@ -172,6 +186,7 @@ def run_agent_request(
                 if on_tool_event is not None:
                     on_tool_event(dict(event))
                 results.append(result)
+                raise_if_cancelled()
             session.add_tool_results(turn.tool_calls, results)
     finally:
         if user_input_context is not None:

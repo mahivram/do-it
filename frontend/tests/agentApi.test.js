@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   answerConfirmation,
   answerUserInput,
+  cancelAgentJob,
   getAgentJob,
   startAgentJob,
 } from "../src/agentApi.js";
@@ -55,6 +56,24 @@ test("polls the local agent for tool activity and completion", async () => {
 
   assert.equal(requestUrl, "/api/jobs/job%20with%2Fslash");
   assert.equal(result.tools[0].name, "open_window");
+});
+
+test("posts a cancellation request for an active agent job", async () => {
+  let requestUrl;
+  let requestOptions;
+  const result = await cancelAgentJob(
+    "job-1",
+    async (url, options) => {
+      requestUrl = url;
+      requestOptions = options;
+      return jsonResponse(200, { status: "cancelling" });
+    },
+  );
+
+  assert.equal(requestUrl, "/api/jobs/job-1/cancel");
+  assert.equal(requestOptions.method, "POST");
+  assert.deepEqual(JSON.parse(requestOptions.body), {});
+  assert.equal(result.status, "cancelling");
 });
 
 test("posts explicit confirmation decisions to the local agent", async () => {

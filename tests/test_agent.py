@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import tests.win32_mocks
-from automation.agent import _system_prompt, run_agent_request
+from automation.agent import AgentCancelled, _system_prompt, run_agent_request
 from automation.providers import ProviderTurn, ToolInvocation
 
 
@@ -14,6 +14,38 @@ class AgentBehaviorTests(unittest.TestCase):
         self.assertIn("inspect_chrome_window", prompt)
         self.assertIn("ask_user", prompt)
         self.assertIn("do not pretend it succeeded", prompt)
+
+    @patch("automation.agent.create_provider_session")
+    def test_cancellation_before_start_does_not_create_provider_session(
+        self, create_session
+    ):
+        with self.assertRaises(AgentCancelled):
+            run_agent_request("Do a task", cancel_check=lambda: True)
+
+        create_session.assert_not_called()
+
+    @patch("automation.agent.execute_tool_call", return_value="Action finished")
+    @patch("automation.agent.create_provider_session")
+    def test_cancellation_after_tool_prevents_another_provider_turn(
+        self, create_session, execute_tool
+    ):
+        session = Mock()
+        session.next_turn.return_value = ProviderTurn(
+            text=None,
+            tool_calls=[ToolInvocation("open_window", '{"application":"chrome"}')],
+        )
+        create_session.return_value = session
+        cancel_checks = iter([False, False, False, False, False, True])
+
+        with self.assertRaises(AgentCancelled):
+            run_agent_request(
+                "Open Chrome",
+                cancel_check=lambda: next(cancel_checks),
+            )
+
+        execute_tool.assert_called_once_with("open_window", '{"application":"chrome"}')
+        session.next_turn.assert_called_once()
+        session.add_tool_results.assert_not_called()
 
     @patch("automation.agent.execute_tool_call", return_value={"error": "Window missing"})
     @patch("automation.agent.create_provider_session")

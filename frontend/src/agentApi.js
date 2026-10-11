@@ -25,6 +25,18 @@ export async function getAgentJob(jobId, fetchImpl = fetch) {
   return readJson(response);
 }
 
+export async function cancelAgentJob(jobId, fetchImpl = fetch) {
+  const response = await fetchImpl(
+    `/api/jobs/${encodeURIComponent(jobId)}/cancel`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    },
+  );
+  return readJson(response);
+}
+
 export async function answerConfirmation(
   jobId,
   confirmationId,

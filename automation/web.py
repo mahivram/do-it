@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from automation.agent import run_agent_request
+from automation.agent import AgentCancelled, run_agent_request
 
 
 LOGGER = logging.getLogger(__name__)
@@ -136,10 +136,11 @@ class _AgentJob:
     confirmation_result: bool | None = None
     interaction_result: str | None = None
     interaction_submitted: bool = False
+    cancel_requested: bool = False
 
 
 class AgentJobs:
-    """Run agent tasks serially and pause for direct browser confirmations."""
+    """Run agent tasks serially with browser interaction and cancellation."""
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
@@ -175,6 +176,7 @@ class AgentJobs:
             job = self._jobs.get(job_id)
             if (
                 job is None
+                or job.cancel_requested
                 or job.confirmation is None
                 or job.confirmation["id"] != confirmation_id
                 or job.confirmation_result is not None
@@ -189,6 +191,7 @@ class AgentJobs:
             job = self._jobs.get(job_id)
             if (
                 job is None
+                or job.cancel_requested
                 or job.interaction is None
                 or job.interaction["id"] != interaction_id
                 or job.interaction_submitted
@@ -199,12 +202,33 @@ class AgentJobs:
             job.condition.notify_all()
             return True
 
+    def cancel(self, job_id: str) -> bool:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None or job.status in {"completed", "failed", "cancelled"}:
+                return False
+            if job.cancel_requested:
+                return False
+            job.cancel_requested = True
+            if job.status == "queued":
+                job.status = "cancelled"
+            else:
+                job.status = "cancelling"
+            job.confirmation = None
+            job.interaction = None
+            job.condition.notify_all()
+            return True
+
     def _run(
         self, job_id: str, prompt: str, provider_config: dict[str, str]
     ) -> None:
         with self._agent_lock:
             with self._lock:
                 job = self._jobs[job_id]
+                if job.cancel_requested:
+                    job.status = "cancelled"
+                    job.condition.notify_all()
+                    return
                 job.status = "running"
             try:
                 result = run_agent_request(
@@ -217,7 +241,13 @@ class AgentJobs:
                         job_id, question, options
                     ),
                     on_tool_event=lambda event: self._record_tool_event(job_id, event),
+                    cancel_check=lambda: self._is_cancel_requested(job_id),
                 )
+            except AgentCancelled:
+                with self._lock:
+                    job.status = "cancelled"
+                    job.confirmation = None
+                    job.interaction = None
             except Exception as exc:
                 LOGGER.exception("Agent job failed")
                 with self._lock:
@@ -230,6 +260,10 @@ class AgentJobs:
             finally:
                 with self._lock:
                     job.condition.notify_all()
+
+    def _is_cancel_requested(self, job_id: str) -> bool:
+        with self._lock:
+            return self._jobs[job_id].cancel_requested
 
     def _record_tool_event(self, job_id: str, event: dict[str, Any]) -> None:
         with self._lock:
@@ -264,17 +298,18 @@ class AgentJobs:
             job.confirmation_result = None
             job.status = "waiting_confirmation"
             deadline = time.monotonic() + CONFIRMATION_TIMEOUT_SECONDS
-            while job.confirmation_result is None:
+            while job.confirmation_result is None and not job.cancel_requested:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     job.confirmation_result = False
                     break
                 job.condition.wait(remaining)
 
-            approved = job.confirmation_result is True
+            approved = job.confirmation_result is True and not job.cancel_requested
             job.confirmation_result = None
             job.confirmation = None
-            job.status = "running"
+            if not job.cancel_requested:
+                job.status = "running"
             return approved
 
     def _request_user_input(
@@ -292,7 +327,7 @@ class AgentJobs:
             job.interaction_submitted = False
             job.status = "waiting_input"
             deadline = time.monotonic() + USER_INPUT_TIMEOUT_SECONDS
-            while not job.interaction_submitted:
+            while not job.interaction_submitted and not job.cancel_requested:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     break
@@ -302,7 +337,8 @@ class AgentJobs:
             job.interaction_result = None
             job.interaction_submitted = False
             job.interaction = None
-            job.status = "running"
+            if not job.cancel_requested:
+                job.status = "running"
             return answer
 
     def _public_job(self, job: _AgentJob) -> dict[str, Any]:
@@ -413,6 +449,19 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                 return
 
             parts = self.path.strip("/").split("/")
+            if (
+                len(parts) == 4
+                and parts[0] == "api"
+                and parts[1] == "jobs"
+                and parts[3] == "cancel"
+            ):
+                if not JOBS.cancel(parts[2]):
+                    self._send_json(409, {"error": "This agent job is no longer active."})
+                    return
+                job = JOBS.get(parts[2])
+                self._send_json(200, {"status": job["status"]})
+                return
+
             if (
                 len(parts) == 4
                 and parts[0] == "api"

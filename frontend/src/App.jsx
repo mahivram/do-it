@@ -3,6 +3,7 @@ import { loadLocalValue, saveLocalValue } from "./storage.js";
 import {
   answerConfirmation,
   answerUserInput,
+  cancelAgentJob,
   getAgentJob,
   startAgentJob,
 } from "./agentApi.js";
@@ -37,6 +38,13 @@ const PROVIDERS = {
 
 const OPENAI_COMPATIBLE_PROVIDERS = ["openrouter", "freellm"];
 const POLL_INTERVAL_MS = 500;
+const ACTIVE_JOB_STATUSES = new Set([
+  "queued",
+  "running",
+  "waiting_confirmation",
+  "waiting_input",
+  "cancelling",
+]);
 
 function waitForNextPoll() {
   return new Promise((resolve) => window.setTimeout(resolve, POLL_INTERVAL_MS));
@@ -87,6 +95,7 @@ function readInitialData() {
         && typeof entry.response === "string"
         && typeof entry.model === "string"
         && PROVIDERS[entry.provider]
+        && (!entry.jobId || typeof entry.jobId === "string")
       ));
     }
   } catch {
@@ -143,11 +152,13 @@ export default function App() {
   const [confirmationPending, setConfirmationPending] = useState(false);
   const [interactionAnswer, setInteractionAnswer] = useState("");
   const [interactionPending, setInteractionPending] = useState(false);
+  const [cancelPendingId, setCancelPendingId] = useState(null);
   const [showKey, setShowKey] = useState(false);
   const [copiedEntryId, setCopiedEntryId] = useState(null);
   const promptInput = useRef(null);
   const activeProvider = PROVIDERS[settings.provider];
   const activeConfig = settings.providers[settings.provider];
+  const activeJobEntry = history.find((entry) => entry.jobId === activeJob?.id);
 
   useEffect(() => {
     try {
@@ -164,6 +175,56 @@ export default function App() {
       setStorageError("Prompt history could not be saved in this browser.");
     }
   }, [history]);
+
+  useEffect(() => {
+    let stopped = false;
+    const resumableEntries = initialData.history.filter(
+      (entry) => entry.jobId && ACTIVE_JOB_STATUSES.has(entry.status),
+    );
+
+    async function resumeJob(entry) {
+      try {
+        while (!stopped) {
+          await waitForNextPoll();
+          const job = await getAgentJob(entry.jobId);
+          if (stopped) {
+            return;
+          }
+          setActiveJob(job);
+          const changes = {
+            status: job.status,
+            tools: (job.tools ?? []).map(({ name, status }) => ({ name, status })),
+            ...(job.error ? { error: job.error } : {}),
+          };
+          if (job.status === "completed") {
+            changes.response = job.response;
+          } else if (job.status === "cancelled") {
+            changes.response = "This task was stopped.";
+          }
+          updateHistoryEntry(entry.id, changes);
+          if (!ACTIVE_JOB_STATUSES.has(job.status)) {
+            setActiveJob((current) => (current?.id === entry.jobId ? null : current));
+            return;
+          }
+        }
+      } catch (resumeError) {
+        if (!stopped) {
+          updateHistoryEntry(entry.id, {
+            status: "failed",
+            error: resumeError instanceof Error
+              ? resumeError.message
+              : "Could not reconnect to this agent task.",
+          });
+          setActiveJob((current) => (current?.id === entry.jobId ? null : current));
+        }
+      }
+    }
+
+    resumableEntries.forEach((entry) => resumeJob(entry));
+    return () => {
+      stopped = true;
+    };
+  }, []);
 
   function updateProviderConfig(provider, changes) {
     setSettings((current) => ({
@@ -182,6 +243,15 @@ export default function App() {
     setSettings((current) => ({ ...current, provider }));
   }
 
+  function updateHistoryEntry(entryId, changes) {
+    setHistory((current) => current.map((entry) => (
+      entry.id === entryId ? { ...entry, ...changes } : entry
+    )));
+    setActiveEntry((current) => (
+      current?.id === entryId ? { ...current, ...changes } : current
+    ));
+  }
+
   async function submitPrompt(event) {
     event.preventDefault();
     const requestPrompt = prompt.trim();
@@ -192,6 +262,7 @@ export default function App() {
     setError("");
     setCopyError("");
     setLoading(true);
+    let entryId;
     try {
       const config = { ...activeConfig };
 
@@ -200,33 +271,66 @@ export default function App() {
         settings.provider,
         config,
       );
+      const entry = {
+        id: started.id,
+        jobId: started.id,
+        prompt: requestPrompt,
+        response: "",
+        provider: settings.provider,
+        model: settings.provider === "freellm" ? "auto" : config.model,
+        tools: [],
+        status: started.status,
+        createdAt: new Date().toISOString(),
+      };
+      entryId = entry.id;
+      setHistory((current) => [entry, ...current].slice(0, 20));
+      setActiveEntry(entry);
       setActiveJob({ id: started.id, status: started.status, tools: [] });
       let job;
       while (true) {
         await waitForNextPoll();
         job = await getAgentJob(started.id);
         setActiveJob(job);
+        updateHistoryEntry(entry.id, {
+          status: job.status,
+          tools: (job.tools ?? []).map(({ name, status }) => ({ name, status })),
+          ...(job.error ? { error: job.error } : {}),
+        });
+        if (job.status === "cancelled") {
+          updateHistoryEntry(entry.id, {
+            status: "cancelled",
+            response: "This task was stopped.",
+          });
+          setPrompt("");
+          break;
+        }
         if (job.status === "completed") {
+          const completedEntry = {
+            ...entry,
+            response: job.response,
+            tools: (job.tools ?? []).map(({ name, status }) => ({ name, status })),
+            status: "completed",
+          };
+          updateHistoryEntry(entry.id, completedEntry);
+          setActiveEntry(completedEntry);
+          setPrompt("");
           break;
         }
         if (job.status === "failed") {
+          updateHistoryEntry(entry.id, {
+            status: "failed",
+            error: job.error || "The Python agent failed.",
+          });
           throw new Error(job.error || "The Python agent failed.");
         }
       }
-
-      const entry = {
-        id: globalThis.crypto?.randomUUID?.() ?? `${Date.now()}`,
-        prompt: requestPrompt,
-        response: job.response,
-        provider: settings.provider,
-        model: settings.provider === "freellm" ? "auto" : config.model,
-        tools: job.tools.map(({ name, status }) => ({ name, status })),
-        createdAt: new Date().toISOString(),
-      };
-      setHistory((current) => [entry, ...current].slice(0, 20));
-      setActiveEntry(entry);
-      setPrompt("");
     } catch (requestError) {
+      if (entryId) {
+        updateHistoryEntry(entryId, {
+          status: "failed",
+          error: requestError instanceof Error ? requestError.message : "The request failed.",
+        });
+      }
       setError(requestError instanceof Error ? requestError.message : "The request failed.");
     } finally {
       setLoading(false);
@@ -234,6 +338,31 @@ export default function App() {
       setInteractionPending(false);
       setInteractionAnswer("");
       setActiveJob(null);
+    }
+  }
+
+  async function handleCancelJob(entry) {
+    if (!entry.jobId || !ACTIVE_JOB_STATUSES.has(entry.status) || cancelPendingId) {
+      return;
+    }
+    setCancelPendingId(entry.id);
+    setError("");
+    try {
+      const result = await cancelAgentJob(entry.jobId);
+      updateHistoryEntry(entry.id, { status: result.status });
+      setActiveJob((current) => (
+        current?.id === entry.jobId
+          ? { ...current, status: result.status }
+          : current
+      ));
+    } catch (cancelError) {
+      setError(
+        cancelError instanceof Error
+          ? cancelError.message
+          : "Could not stop the agent task.",
+      );
+    } finally {
+      setCancelPendingId(null);
     }
   }
 
@@ -334,8 +463,14 @@ export default function App() {
             <button
               className="clear-history"
               onClick={() => {
-                setHistory([]);
-                setActiveEntry(null);
+                setHistory((current) => current.filter(
+                  (entry) => entry.jobId && ACTIVE_JOB_STATUSES.has(entry.status),
+                ));
+                setActiveEntry((current) => (
+                  current?.jobId && ACTIVE_JOB_STATUSES.has(current.status)
+                    ? current
+                    : null
+                ));
               }}
             >
               Clear
@@ -347,19 +482,58 @@ export default function App() {
             <p className="empty-history">Your recent prompts will appear here.</p>
           ) : (
             history.map((entry) => (
-              <button
+              <div
                 className={`history-item ${activeEntry?.id === entry.id ? "active" : ""}`}
                 key={entry.id}
-                onClick={() => {
-                  setActiveEntry(entry);
-                  setPrompt(entry.prompt);
-                  setPage("chat");
-                }}
-                title={entry.prompt}
               >
-                <span className="history-item-title">{entry.prompt}</span>
-                <span className="history-item-meta">{PROVIDERS[entry.provider]?.name ?? entry.provider}</span>
-              </button>
+                <button
+                  className="history-item-select"
+                  type="button"
+                  onClick={() => {
+                    setActiveEntry(entry);
+                    setPrompt(entry.prompt);
+                    setPage("chat");
+                  }}
+                  title={entry.prompt}
+                >
+                  <span className="history-item-title">{entry.prompt}</span>
+                  <span className="history-item-meta-row">
+                    <span className="history-item-meta">{PROVIDERS[entry.provider]?.name ?? entry.provider}</span>
+                    {ACTIVE_JOB_STATUSES.has(entry.status) && (
+                      <span className={`history-job-status ${entry.status}`} role="status">
+                        {entry.status === "waiting_confirmation"
+                          ? "Needs approval"
+                          : entry.status === "waiting_input"
+                            ? "Needs answer"
+                            : entry.status === "cancelling"
+                              ? "Stopping…"
+                              : entry.status === "queued"
+                                ? "Queued"
+                                : "Running"}
+                      </span>
+                    )}
+                    {entry.status === "cancelled" && (
+                      <span className="history-job-status cancelled">Stopped</span>
+                    )}
+                    {entry.status === "failed" && (
+                      <span className="history-job-status failed">Failed</span>
+                    )}
+                  </span>
+                </button>
+                {entry.jobId && ACTIVE_JOB_STATUSES.has(entry.status) && (
+                  <button
+                    className="history-stop-button"
+                    type="button"
+                    disabled={entry.status === "cancelling" || cancelPendingId === entry.id}
+                    onClick={() => handleCancelJob(entry)}
+                    aria-label={`Stop prompt: ${entry.prompt}`}
+                  >
+                    {entry.status === "cancelling" || cancelPendingId === entry.id
+                      ? "Stopping"
+                      : "Stop"}
+                  </button>
+                )}
+              </div>
             ))
           )}
         </div>
@@ -549,11 +723,25 @@ export default function App() {
               />
               <div className="prompt-card-bottom">
                 <span className="keyboard-hint"><kbd>Ctrl</kbd><kbd>↵</kbd> to send</span>
-                <button className="send-button" type="submit" disabled={loading || !prompt.trim()}>
-                  {loading ? <span className="spinner" /> : <Icon name="send" size={16} />}
-                  <span>{loading ? "Thinking..." : "Send prompt"}</span>
-                  {!loading && <kbd>↵</kbd>}
-                </button>
+                <div className="prompt-actions">
+                  {loading && activeJobEntry && ACTIVE_JOB_STATUSES.has(activeJobEntry.status) && (
+                    <button
+                      className="prompt-stop-button"
+                      type="button"
+                      disabled={activeJobEntry.status === "cancelling" || cancelPendingId === activeJobEntry.id}
+                      onClick={() => handleCancelJob(activeJobEntry)}
+                    >
+                      {activeJobEntry.status === "cancelling" || cancelPendingId === activeJobEntry.id
+                        ? "Stopping…"
+                        : "Stop"}
+                    </button>
+                  )}
+                  <button className="send-button" type="submit" disabled={loading || !prompt.trim()}>
+                    {loading ? <span className="spinner" /> : <Icon name="send" size={16} />}
+                    <span>{loading ? "Thinking..." : "Send prompt"}</span>
+                    {!loading && <kbd>↵</kbd>}
+                  </button>
+                </div>
               </div>
             </form>
 
@@ -579,7 +767,9 @@ export default function App() {
                   </span>
                   <span>
                     <strong>
-                      {activeJob.status === "waiting_confirmation"
+                      {activeJob.status === "cancelling"
+                        ? "Stopping after the current step"
+                        : activeJob.status === "waiting_confirmation"
                         ? "Your approval is needed"
                         : activeJob.status === "waiting_input"
                           ? "The agent needs your choice"
@@ -587,9 +777,25 @@ export default function App() {
                           ? "Waiting for the agent"
                           : "Python agent is working"}
                     </strong>
-                    <span>The agent can use your desktop and project tools.</span>
+                    <span>
+                      {activeJob.status === "cancelling"
+                        ? "A provider response or desktop action already in progress must finish before the task can stop."
+                        : "The agent can use your desktop and project tools."}
+                    </span>
                   </span>
                 </div>
+                {activeJobEntry && ACTIVE_JOB_STATUSES.has(activeJobEntry.status) && (
+                  <button
+                    className="progress-stop-button"
+                    type="button"
+                    disabled={activeJobEntry.status === "cancelling" || cancelPendingId === activeJobEntry.id}
+                    onClick={() => handleCancelJob(activeJobEntry)}
+                  >
+                    {activeJobEntry.status === "cancelling" || cancelPendingId === activeJobEntry.id
+                      ? "Stopping task…"
+                      : "Stop task"}
+                  </button>
+                )}
                 {activeJob.tools?.length > 0 && (
                   <ul className="tool-activity">
                     {activeJob.tools.map((tool, index) => (
@@ -678,7 +884,7 @@ export default function App() {
               </div>
             )}
 
-            {activeEntry ? (
+            {activeEntry?.response ? (
               <article className="response-card">
                 <div className="response-heading">
                   <div className="response-heading-label"><span className="response-icon"><Icon name="spark" size={17} /></span><span>RESPONSE</span></div>
@@ -733,7 +939,23 @@ export default function App() {
             ) : (
               <div className="empty-state">
                 <div className="empty-state-icon"><Icon name="spark" size={22} /></div>
-                <div><strong>A little room to think.</strong><span>Your answer will show up here.</span></div>
+                <div>
+                  <strong>
+                    {activeEntry?.status === "cancelled"
+                      ? "Task stopped."
+                      : activeEntry?.status === "failed"
+                        ? "Task failed."
+                        : activeEntry && ACTIVE_JOB_STATUSES.has(activeEntry.status)
+                          ? "Your task is still running."
+                          : "A little room to think."}
+                  </strong>
+                  <span>
+                    {activeEntry?.error
+                      || (activeEntry && ACTIVE_JOB_STATUSES.has(activeEntry.status)
+                        ? "Check its progress in recent prompts, or stop it there."
+                        : "Your answer will show up here.")}
+                  </span>
+                </div>
               </div>
             )}
 

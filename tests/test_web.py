@@ -8,6 +8,7 @@ import time
 import unittest
 from unittest.mock import patch
 
+from automation.agent import AgentCancelled
 from automation.web import (
     AgentJobs,
     AgentRequestHandler,
@@ -192,6 +193,7 @@ class AgentJobTests(unittest.TestCase):
             confirmation_handler,
             user_input_handler,
             on_tool_event,
+            cancel_check,
         ):
             on_tool_event(
                 {"id": 0, "name": "get_active_windows", "status": "running"}
@@ -245,6 +247,36 @@ class AgentJobTests(unittest.TestCase):
         self.assertIsNone(job["interaction"])
 
     @patch("automation.web.run_agent_request")
+    def test_cancels_job_while_waiting_for_confirmation(self, run_agent):
+        def request_approval(
+            _prompt,
+            provider_config,
+            confirmation_handler,
+            user_input_handler,
+            on_tool_event,
+            cancel_check,
+        ):
+            confirmation_handler("Restart Windows")
+            if cancel_check():
+                raise AgentCancelled()
+            return {"response": "Unexpectedly continued", "tools": []}
+
+        run_agent.side_effect = request_approval
+        jobs = AgentJobs()
+        job_id = jobs.create("Restart Windows", {"provider": "gemini"})
+        pending = self.wait_for_status(jobs, job_id, "waiting_confirmation")
+
+        self.assertTrue(jobs.cancel(job_id))
+        self.assertEqual(jobs.get(job_id)["status"], "cancelling")
+        self.assertFalse(
+            jobs.confirm(job_id, pending["confirmation"]["id"], approved=True)
+        )
+        cancelled = self.wait_for_status(jobs, job_id, "cancelled")
+
+        self.assertIsNone(cancelled["confirmation"])
+        self.assertFalse(jobs.cancel(job_id))
+
+    @patch("automation.web.run_agent_request")
     def test_waits_for_explicit_confirmation_and_resumes_agent(self, run_agent):
         def request_approval(
             _prompt,
@@ -252,6 +284,7 @@ class AgentJobTests(unittest.TestCase):
             confirmation_handler,
             user_input_handler,
             on_tool_event,
+            cancel_check,
         ):
             approved = confirmation_handler("Restart Windows")
             return {"response": f"Approved: {approved}", "tools": []}
@@ -277,6 +310,7 @@ class AgentJobTests(unittest.TestCase):
             confirmation_handler,
             user_input_handler,
             on_tool_event,
+            cancel_check,
         ):
             answer = user_input_handler(
                 "Which account should I use?",
@@ -400,6 +434,25 @@ class LocalHttpApiTests(unittest.TestCase):
             "question-456",
             "Work account",
         )
+
+    @patch("automation.web.JOBS.get", return_value={"status": "cancelling"})
+    @patch("automation.web.JOBS.cancel", return_value=True)
+    def test_cancel_endpoint_requests_job_cancellation(self, cancel, get_job):
+        self.connection.request(
+            "POST",
+            "/api/jobs/job-123/cancel",
+            body=json.dumps({}),
+            headers={
+                "Content-Type": "application/json",
+                "Origin": f"http://127.0.0.1:{self.server.server_port}",
+            },
+        )
+        response = self.connection.getresponse()
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(json.loads(response.read()), {"status": "cancelling"})
+        cancel.assert_called_once_with("job-123")
+        get_job.assert_called_once_with("job-123")
 
     def test_serves_built_frontend_and_spa_fallback(self):
         with tempfile.TemporaryDirectory() as temp_dir:

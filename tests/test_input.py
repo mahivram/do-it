@@ -1,7 +1,16 @@
+import ctypes
+from ctypes import wintypes
 import unittest
+from unittest.mock import patch
 
 from tests.win32_mocks import win32api, win32con
 from automation.input import (
+    _INPUT_KEYBOARD,
+    _KEYEVENTF_KEYUP,
+    _KEYEVENTF_UNICODE,
+    _Input,
+    _send_unicode_input,
+    _unicode_input_events,
     click_mouse,
     move_mouse,
     press_key,
@@ -14,15 +23,56 @@ class KeyboardTests(unittest.TestCase):
     def setUp(self):
         win32api.key_events.clear()
 
-    def test_type_text_sends_unicode_utf16_units(self):
-        self.assertEqual(type_text("A🙂"), "Typed 2 characters")
-        units = [event[1] for event in win32api.key_events]
-        self.assertEqual(units, [ord("A"), ord("A"), 0xD83D, 0xD83D, 0xDE42, 0xDE42])
+    def test_type_text_sends_unicode_utf16_events_in_one_batch(self):
+        with patch("automation.input._send_unicode_input") as send_input:
+            self.assertEqual(
+                type_text("A🙂"),
+                "Sent input for 2 characters; application contents were not verified",
+            )
+
+        send_input.assert_called_once()
+        events = send_input.call_args.args[0]
+        expected_input_size = 40 if ctypes.sizeof(wintypes.WPARAM) == 8 else 28
+        self.assertEqual(ctypes.sizeof(_Input), expected_input_size)
+        self.assertEqual(
+            [
+                (event.type, event.union.ki.wScan, event.union.ki.dwFlags)
+                for event in events
+            ],
+            [
+                (_INPUT_KEYBOARD, ord("A"), _KEYEVENTF_UNICODE),
+                (_INPUT_KEYBOARD, ord("A"), _KEYEVENTF_UNICODE | _KEYEVENTF_KEYUP),
+                (_INPUT_KEYBOARD, 0xD83D, _KEYEVENTF_UNICODE),
+                (_INPUT_KEYBOARD, 0xD83D, _KEYEVENTF_UNICODE | _KEYEVENTF_KEYUP),
+                (_INPUT_KEYBOARD, 0xDE42, _KEYEVENTF_UNICODE),
+                (_INPUT_KEYBOARD, 0xDE42, _KEYEVENTF_UNICODE | _KEYEVENTF_KEYUP),
+            ],
+        )
 
     def test_type_text_rejects_oversized_input(self):
         with self.assertRaisesRegex(ValueError, "5000"):
             type_text("x" * 5001)
         self.assertEqual(win32api.key_events, [])
+
+    def test_type_text_reports_windows_input_failure(self):
+        with patch(
+            "automation.input._send_unicode_input",
+            side_effect=OSError("input was not accepted"),
+        ):
+            with self.assertRaisesRegex(OSError, "not accepted"):
+                type_text("hello")
+
+    def test_send_unicode_input_raises_when_windows_accepts_only_part_of_batch(self):
+        class FakeSendInput:
+            def __call__(self, event_count, _events, _event_size):
+                return event_count - 1
+
+        class FakeUser32:
+            SendInput = FakeSendInput()
+
+        with patch("automation.input.ctypes.WinDLL", return_value=FakeUser32()):
+            with self.assertRaisesRegex(OSError, "accepted 3 of 4"):
+                _send_unicode_input(_unicode_input_events("ab"))
 
     def test_press_key_releases_key_and_modifiers_in_reverse_order(self):
         self.assertEqual(press_key("enter", ["ctrl", "shift"]), "Pressed ctrl+shift+enter")

@@ -1,5 +1,42 @@
+import ctypes
+from ctypes import wintypes
+
 import win32api
 import win32con
+
+
+_INPUT_KEYBOARD = 1
+_KEYEVENTF_UNICODE = 0x0004
+_KEYEVENTF_KEYUP = 0x0002
+
+
+class _KeyboardInput(ctypes.Structure):
+    _fields_ = (
+        ("wVk", wintypes.WORD),
+        ("wScan", wintypes.WORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", wintypes.WPARAM),
+    )
+
+
+class _MouseInput(ctypes.Structure):
+    _fields_ = (
+        ("dx", wintypes.LONG),
+        ("dy", wintypes.LONG),
+        ("mouseData", wintypes.DWORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", wintypes.WPARAM),
+    )
+
+
+class _InputUnion(ctypes.Union):
+    _fields_ = (("mi", _MouseInput), ("ki", _KeyboardInput))
+
+
+class _Input(ctypes.Structure):
+    _fields_ = (("type", wintypes.DWORD), ("union", _InputUnion))
 
 
 _KEYS = {
@@ -27,9 +64,6 @@ _KEYS = {
 _KEYS.update({chr(code).lower(): code for code in range(ord("A"), ord("Z") + 1)})
 _KEYS.update({str(digit): ord(str(digit)) for digit in range(10)})
 _KEYS.update({f"f{number}": win32con.VK_F1 + number - 1 for number in range(1, 13)})
-_VK_PACKET = 0xE7
-_KEYEVENTF_UNICODE = 0x0004
-_KEYEVENTF_KEYUP = 0x0002
 _MOUSE_BUTTONS = {
     "left": (win32con.MOUSEEVENTF_LEFTDOWN, win32con.MOUSEEVENTF_LEFTUP),
     "right": (win32con.MOUSEEVENTF_RIGHTDOWN, win32con.MOUSEEVENTF_RIGHTUP),
@@ -37,22 +71,49 @@ _MOUSE_BUTTONS = {
 }
 
 
+def _unicode_input_events(text: str) -> list[_Input]:
+    encoded_text = text.encode("utf-16-le")
+    events = []
+    for index in range(0, len(encoded_text), 2):
+        unit = int.from_bytes(encoded_text[index : index + 2], byteorder="little")
+        for flags in (_KEYEVENTF_UNICODE, _KEYEVENTF_UNICODE | _KEYEVENTF_KEYUP):
+            events.append(
+                _Input(
+                    type=_INPUT_KEYBOARD,
+                    union=_InputUnion(
+                        ki=_KeyboardInput(wVk=0, wScan=unit, dwFlags=flags)
+                    ),
+                )
+            )
+    return events
+
+
+def _send_unicode_input(events: list[_Input]) -> None:
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    send_input = user32.SendInput
+    send_input.argtypes = (
+        wintypes.UINT,
+        ctypes.POINTER(_Input),
+        ctypes.c_int,
+    )
+    send_input.restype = wintypes.UINT
+    event_array = (_Input * len(events))(*events)
+    sent = send_input(len(events), event_array, ctypes.sizeof(_Input))
+    if sent != len(events):
+        raise OSError(
+            ctypes.get_last_error(),
+            f"Windows accepted {sent} of {len(events)} keyboard input events",
+        )
+
+
 def type_text(text: str) -> str:
     """Type Unicode text into the currently focused application."""
     if len(text) > 5000:
         raise ValueError("Text is limited to 5000 characters per call")
 
-    encoded_text = text.encode("utf-16-le")
-    for index in range(0, len(encoded_text), 2):
-        unit = int.from_bytes(encoded_text[index : index + 2], byteorder="little")
-        win32api.keybd_event(_VK_PACKET, unit, _KEYEVENTF_UNICODE, 0)
-        win32api.keybd_event(
-            _VK_PACKET,
-            unit,
-            _KEYEVENTF_UNICODE | _KEYEVENTF_KEYUP,
-            0,
-        )
-    return f"Typed {len(text)} characters"
+    if text:
+        _send_unicode_input(_unicode_input_events(text))
+    return f"Sent input for {len(text)} characters; application contents were not verified"
 
 
 def press_key(key: str, modifiers: list[str] | None = None) -> str:

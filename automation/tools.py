@@ -348,7 +348,11 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "type_text",
-            "description": "Type Unicode text into the currently focused application.",
+            "description": (
+                "Type the provided Unicode text exactly into the currently "
+                "focused application. This reports input events sent; it does "
+                "not verify the application's resulting contents."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {"text": {"type": "string", "maxLength": 5000}},

@@ -3,6 +3,9 @@
 import json
 import logging
 import mimetypes
+import os
+import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -23,6 +26,16 @@ MAX_JOBS = 50
 CONFIRMATION_TIMEOUT_SECONDS = 120
 ALLOWED_PROVIDERS = {"openrouter", "freellm", "gemini"}
 LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
+RELOAD_POLL_SECONDS = 0.5
+RELOAD_IGNORED_DIRECTORIES = {
+    ".git",
+    ".venv",
+    "__pycache__",
+    "frontend",
+    "node_modules",
+    "tests",
+    "venv",
+}
 
 
 def _loopback_origin(value: str | None, server_port: int) -> bool:
@@ -394,9 +407,85 @@ class LoopbackAgentServer(ThreadingHTTPServer):
     daemon_threads = True
 
 
-def serve(host: str = "127.0.0.1", port: int = 8000) -> None:
+def _python_source_snapshot(
+    project_root: Path = PROJECT_ROOT,
+) -> tuple[tuple[str, int, int], ...]:
+    """Return timestamps and sizes for runtime Python files in the project."""
+    snapshot = []
+    for current_root, directories, files in os.walk(project_root):
+        directories[:] = [
+            name
+            for name in directories
+            if name not in RELOAD_IGNORED_DIRECTORIES
+        ]
+        for name in files:
+            if not name.endswith(".py"):
+                continue
+            source_path = Path(current_root) / name
+            stat = source_path.stat()
+            snapshot.append(
+                (
+                    source_path.relative_to(project_root).as_posix(),
+                    stat.st_mtime_ns,
+                    stat.st_size,
+                )
+            )
+    return tuple(sorted(snapshot))
+
+
+def _wait_for_python_source_change(
+    snapshot: tuple[tuple[str, int, int], ...],
+    process: subprocess.Popen[bytes] | None,
+    project_root: Path = PROJECT_ROOT,
+) -> tuple[tuple[str, int, int], ...]:
+    while True:
+        time.sleep(RELOAD_POLL_SECONDS)
+        latest = _python_source_snapshot(project_root)
+        if latest != snapshot:
+            return latest
+        if process is not None and process.poll() is not None:
+            print("Python server stopped; waiting for a source change to restart it.")
+            process = None
+
+
+def _serve_with_reload(host: str, port: int) -> None:
+    project_root = PROJECT_ROOT
+    entry_point = project_root / "web.py"
+    command = [
+        sys.executable,
+        str(entry_point),
+        "--host",
+        host,
+        "--port",
+        str(port),
+    ]
+    snapshot = _python_source_snapshot(project_root)
+    print("Python hot reload enabled; watching project Python files.")
+
+    while True:
+        process = subprocess.Popen(command, cwd=project_root)
+        try:
+            snapshot = _wait_for_python_source_change(snapshot, process, project_root)
+        except KeyboardInterrupt:
+            if process.poll() is None:
+                process.terminate()
+                process.wait()
+            print("\nStopping Do It agent UI.")
+            return
+
+        if process.poll() is None:
+            process.terminate()
+            process.wait()
+        print("Python source changed; restarting the local agent server.")
+
+
+def serve(host: str = "127.0.0.1", port: int = 8000, reload: bool = False) -> None:
     if host not in LOOPBACK_HOSTS:
         raise ValueError("The agent web server must bind to a loopback address.")
+    if reload:
+        _serve_with_reload(host, port)
+        return
+
     server = LoopbackAgentServer((host, port), AgentRequestHandler)
     print(f"Do It agent UI: http://{host}:{server.server_port}")
     if not (FRONTEND_DIST / "index.html").is_file():

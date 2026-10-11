@@ -1,6 +1,7 @@
 import http.client
 import json
 from pathlib import Path
+import sys
 import tempfile
 import threading
 import time
@@ -11,6 +12,8 @@ from automation.web import (
     AgentJobs,
     AgentRequestHandler,
     LoopbackAgentServer,
+    _python_source_snapshot,
+    _serve_with_reload,
     _loopback_origin,
     validate_request,
 )
@@ -89,6 +92,84 @@ class WebRequestValidationTests(unittest.TestCase):
         self.assertFalse(_loopback_origin("https://attacker.example", 8000))
         self.assertFalse(_loopback_origin("http://localhost", 8000))
         self.assertFalse(_loopback_origin("null", 8000))
+
+
+class PythonHotReloadTests(unittest.TestCase):
+    def test_source_snapshot_tracks_project_python_files_but_skips_generated_dirs(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "automation").mkdir()
+            (root / "automation" / "agent.py").write_text("value = 1", encoding="utf-8")
+            (root / "frontend").mkdir()
+            (root / "frontend" / "config.py").write_text("ignored = True", encoding="utf-8")
+            (root / "tests").mkdir()
+            (root / "tests" / "test_agent.py").write_text("ignored = True", encoding="utf-8")
+            (root / "web.py").write_text("value = 2", encoding="utf-8")
+
+            before = _python_source_snapshot(root)
+            (root / "automation" / "agent.py").write_text("value = 10", encoding="utf-8")
+
+            after = _python_source_snapshot(root)
+
+        self.assertEqual({item[0] for item in before}, {"automation/agent.py", "web.py"})
+        self.assertNotEqual(before, after)
+
+    def test_reload_supervisor_restarts_child_when_source_changes(self):
+        class FakeProcess:
+            def __init__(self):
+                self.running = True
+                self.terminated = False
+                self.waited = False
+
+            def poll(self):
+                return None if self.running else 0
+
+            def terminate(self):
+                self.terminated = True
+                self.running = False
+
+            def wait(self):
+                self.waited = True
+                return 0
+
+        initial = (("web.py", 1, 10),)
+        changed = (("web.py", 2, 10),)
+        first_process = FakeProcess()
+        second_process = FakeProcess()
+        with (
+            patch("automation.web._python_source_snapshot", return_value=initial),
+            patch(
+                "automation.web._wait_for_python_source_change",
+                side_effect=[changed, KeyboardInterrupt],
+            ),
+            patch(
+                "automation.web.subprocess.Popen",
+                side_effect=[first_process, second_process],
+            ) as start_process,
+        ):
+            _serve_with_reload("127.0.0.1", 8000)
+
+        self.assertEqual(start_process.call_count, 2)
+        command = start_process.call_args_list[0].args[0]
+        self.assertEqual(command[0], sys.executable)
+        self.assertEqual(
+            command[1:],
+            [
+                str(Path(__file__).resolve().parents[1] / "web.py"),
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "8000",
+            ],
+        )
+        self.assertEqual(
+            start_process.call_args_list[0].kwargs["cwd"],
+            Path(__file__).resolve().parents[1],
+        )
+        self.assertTrue(first_process.terminated)
+        self.assertTrue(first_process.waited)
+        self.assertTrue(second_process.terminated)
+        self.assertTrue(second_process.waited)
 
 
 class AgentJobTests(unittest.TestCase):

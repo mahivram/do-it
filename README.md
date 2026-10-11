@@ -83,9 +83,12 @@ browser's local storage. The API key is not encrypted there and is sent to the
 loopback Python server, which uses it to contact the selected provider. The
 server binds only to `127.0.0.1`.
 
-For frontend development, run `python web.py` in one terminal and
+For frontend development, run `python web.py --reload` in one terminal and
 `npm --prefix frontend run dev` in another; Vite proxies `/api` requests to
-the local Python agent.
+the local Python agent. The Python server restarts when project `.py` files
+change. Frontend changes are hot-reloaded by Vite. A backend reload interrupts
+any agent job currently running. For normal use, start the backend with
+`python web.py` without `--reload`.
 
 Run the frontend unit tests and production build from the project root:
 
@@ -111,8 +114,10 @@ their inputs/outputs; they do not test LLM agent orchestration.
 - **Windows:** list visible windows, focus a window, open an application, close a
   window gracefully, and set a window's bounds with `set_window_bounds(hwnd, x,
   y, w, h)`.
-- **Keyboard and mouse:** type Unicode text into the focused application, press
-  named keys with modifiers, move the pointer, click, and scroll.
+- **Keyboard and mouse:** send Unicode text to the focused application, press
+  named keys with modifiers, move the pointer, click, and scroll. Text input
+  reports sent keyboard events; it cannot verify what the target application
+  ultimately displays.
 - **Processes:** `kill_process(pid)` force-terminates a process and its child
   processes. This cannot be undone; only request it when you intend to stop that
   process. The agent itself cannot terminate itself.

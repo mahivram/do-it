@@ -229,6 +229,21 @@ class AgentJobTests(unittest.TestCase):
         )
         self.assertNotIn("private-key", json.dumps(job))
 
+    @patch(
+        "automation.web.run_agent_request",
+        side_effect=RuntimeError("provider unavailable"),
+    )
+    def test_marks_agent_job_failed_and_preserves_error(self, _run_agent):
+        jobs = AgentJobs()
+        job_id = jobs.create("Run a task", {"provider": "gemini"})
+
+        job = self.wait_for_status(jobs, job_id, "failed")
+
+        self.assertIsNone(job["response"])
+        self.assertEqual(job["error"], "provider unavailable")
+        self.assertIsNone(job["confirmation"])
+        self.assertIsNone(job["interaction"])
+
     @patch("automation.web.run_agent_request")
     def test_waits_for_explicit_confirmation_and_resumes_agent(self, run_agent):
         def request_approval(

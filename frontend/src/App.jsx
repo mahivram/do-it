@@ -241,29 +241,6 @@ export default function App() {
     if (!activeJob?.confirmation || confirmationPending) {
       return;
     }
-
-    async function handleUserInput(answer) {
-      if (!activeJob?.interaction || interactionPending || !answer.trim()) {
-        return;
-      }
-      setInteractionPending(true);
-      try {
-        await answerUserInput(
-          activeJob.id,
-          activeJob.interaction.id,
-          answer.trim(),
-        );
-        setInteractionAnswer("");
-      } catch (inputError) {
-        setError(
-          inputError instanceof Error
-            ? inputError.message
-            : "Could not send your answer to the agent.",
-        );
-      } finally {
-        setInteractionPending(false);
-      }
-    }
     setConfirmationPending(true);
     try {
       await answerConfirmation(
@@ -279,6 +256,29 @@ export default function App() {
       );
     } finally {
       setConfirmationPending(false);
+    }
+  }
+
+  async function handleUserInput(answer) {
+    if (!activeJob?.interaction || interactionPending || !answer.trim()) {
+      return;
+    }
+    setInteractionPending(true);
+    try {
+      await answerUserInput(
+        activeJob.id,
+        activeJob.interaction.id,
+        answer.trim(),
+      );
+      setInteractionAnswer("");
+    } catch (inputError) {
+      setError(
+        inputError instanceof Error
+          ? inputError.message
+          : "Could not send your answer to the agent.",
+      );
+    } finally {
+      setInteractionPending(false);
     }
   }
 

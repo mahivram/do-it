@@ -9,6 +9,7 @@ import sys
 import threading
 import time
 import uuid
+from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -121,30 +122,37 @@ def validate_request(data: Any) -> tuple[str, dict[str, str]]:
     return prompt.strip(), provider_settings
 
 
+@dataclass
+class _AgentJob:
+    id: str
+    condition: threading.Condition
+    created_at: float
+    status: str = "queued"
+    response: str | None = None
+    error: str | None = None
+    tools: list[dict[str, Any]] = field(default_factory=list)
+    confirmation: dict[str, str] | None = None
+    interaction: dict[str, Any] | None = None
+    confirmation_result: bool | None = None
+    interaction_result: str | None = None
+    interaction_submitted: bool = False
+
+
 class AgentJobs:
     """Run agent tasks serially and pause for direct browser confirmations."""
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
         self._agent_lock = threading.Lock()
-        self._jobs: dict[str, dict[str, Any]] = {}
+        self._jobs: dict[str, _AgentJob] = {}
 
     def create(self, prompt: str, provider_config: dict[str, str]) -> str:
         job_id = uuid.uuid4().hex
-        job = {
-            "id": job_id,
-            "status": "queued",
-            "response": None,
-            "error": None,
-            "tools": [],
-            "confirmation": None,
-            "interaction": None,
-            "_condition": threading.Condition(self._lock),
-            "_confirmation_result": None,
-            "_interaction_result": None,
-            "_interaction_submitted": False,
-            "_created_at": time.monotonic(),
-        }
+        job = _AgentJob(
+            id=job_id,
+            condition=threading.Condition(self._lock),
+            created_at=time.monotonic(),
+        )
         with self._lock:
             self._jobs[job_id] = job
             self._prune()
@@ -165,30 +173,30 @@ class AgentJobs:
     def confirm(self, job_id: str, confirmation_id: str, approved: bool) -> bool:
         with self._lock:
             job = self._jobs.get(job_id)
-            confirmation = job.get("confirmation") if job else None
             if (
-                confirmation is None
-                or confirmation["id"] != confirmation_id
-                or job["_confirmation_result"] is not None
+                job is None
+                or job.confirmation is None
+                or job.confirmation["id"] != confirmation_id
+                or job.confirmation_result is not None
             ):
                 return False
-            job["_confirmation_result"] = approved
-            job["_condition"].notify_all()
+            job.confirmation_result = approved
+            job.condition.notify_all()
             return True
 
     def submit_input(self, job_id: str, interaction_id: str, answer: str) -> bool:
         with self._lock:
             job = self._jobs.get(job_id)
-            interaction = job.get("interaction") if job else None
             if (
-                interaction is None
-                or interaction["id"] != interaction_id
-                or job["_interaction_submitted"]
+                job is None
+                or job.interaction is None
+                or job.interaction["id"] != interaction_id
+                or job.interaction_submitted
             ):
                 return False
-            job["_interaction_result"] = answer
-            job["_interaction_submitted"] = True
-            job["_condition"].notify_all()
+            job.interaction_result = answer
+            job.interaction_submitted = True
+            job.condition.notify_all()
             return True
 
     def _run(
@@ -197,7 +205,7 @@ class AgentJobs:
         with self._agent_lock:
             with self._lock:
                 job = self._jobs[job_id]
-                job["status"] = "running"
+                job.status = "running"
             try:
                 result = run_agent_request(
                     prompt,
@@ -213,15 +221,15 @@ class AgentJobs:
             except Exception as exc:
                 LOGGER.exception("Agent job failed")
                 with self._lock:
-                    job["status"] = "failed"
-                    job["error"] = str(exc)
+                    job.status = "failed"
+                    job.error = str(exc)
             else:
                 with self._lock:
-                    job["status"] = "completed"
-                    job["response"] = result["response"]
+                    job.status = "completed"
+                    job.response = result["response"]
             finally:
                 with self._lock:
-                    job["_condition"].notify_all()
+                    job.condition.notify_all()
 
     def _record_tool_event(self, job_id: str, event: dict[str, Any]) -> None:
         with self._lock:
@@ -238,35 +246,35 @@ class AgentJobs:
                     if len(result) <= 4000
                     else result[:4000] + "… (truncated)"
                 )
-            for index, existing in enumerate(job["tools"]):
+            for index, existing in enumerate(job.tools):
                 if existing["id"] == event["id"]:
-                    job["tools"][index] = tool_event
+                    job.tools[index] = tool_event
                     break
             else:
-                job["tools"].append(tool_event)
+                job.tools.append(tool_event)
 
     def _request_confirmation(self, job_id: str, description: str) -> bool:
         with self._lock:
             job = self._jobs[job_id]
             confirmation_id = uuid.uuid4().hex
-            job["confirmation"] = {
+            job.confirmation = {
                 "id": confirmation_id,
                 "description": description,
             }
-            job["_confirmation_result"] = None
-            job["status"] = "waiting_confirmation"
+            job.confirmation_result = None
+            job.status = "waiting_confirmation"
             deadline = time.monotonic() + CONFIRMATION_TIMEOUT_SECONDS
-            while job["_confirmation_result"] is None:
+            while job.confirmation_result is None:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    job["_confirmation_result"] = False
+                    job.confirmation_result = False
                     break
-                job["_condition"].wait(remaining)
+                job.condition.wait(remaining)
 
-            approved = job["_confirmation_result"] is True
-            job["_confirmation_result"] = None
-            job["confirmation"] = None
-            job["status"] = "running"
+            approved = job.confirmation_result is True
+            job.confirmation_result = None
+            job.confirmation = None
+            job.status = "running"
             return approved
 
     def _request_user_input(
@@ -275,37 +283,37 @@ class AgentJobs:
         with self._lock:
             job = self._jobs[job_id]
             interaction_id = uuid.uuid4().hex
-            job["interaction"] = {
+            job.interaction = {
                 "id": interaction_id,
                 "question": question,
                 "options": options,
             }
-            job["_interaction_result"] = None
-            job["_interaction_submitted"] = False
-            job["status"] = "waiting_input"
+            job.interaction_result = None
+            job.interaction_submitted = False
+            job.status = "waiting_input"
             deadline = time.monotonic() + USER_INPUT_TIMEOUT_SECONDS
-            while not job["_interaction_submitted"]:
+            while not job.interaction_submitted:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     break
-                job["_condition"].wait(remaining)
+                job.condition.wait(remaining)
 
-            answer = job["_interaction_result"]
-            job["_interaction_result"] = None
-            job["_interaction_submitted"] = False
-            job["interaction"] = None
-            job["status"] = "running"
+            answer = job.interaction_result
+            job.interaction_result = None
+            job.interaction_submitted = False
+            job.interaction = None
+            job.status = "running"
             return answer
 
-    def _public_job(self, job: dict[str, Any]) -> dict[str, Any]:
+    def _public_job(self, job: _AgentJob) -> dict[str, Any]:
         return {
-            "id": job["id"],
-            "status": job["status"],
-            "response": job["response"],
-            "error": job["error"],
-            "tools": list(job["tools"]),
-            "confirmation": job["confirmation"],
-            "interaction": job["interaction"],
+            "id": job.id,
+            "status": job.status,
+            "response": job.response,
+            "error": job.error,
+            "tools": list(job.tools),
+            "confirmation": job.confirmation,
+            "interaction": job.interaction,
         }
 
     def _prune(self) -> None:
@@ -313,9 +321,9 @@ class AgentJobs:
             (
                 (job_id, job)
                 for job_id, job in self._jobs.items()
-                if job["status"] in {"completed", "failed"}
+                if job.status in {"completed", "failed"}
             ),
-            key=lambda item: item[1]["_created_at"],
+            key=lambda item: item[1].created_at,
         )
         while len(self._jobs) > MAX_JOBS and completed:
             job_id, _ = completed.pop(0)

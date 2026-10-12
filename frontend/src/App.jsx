@@ -7,6 +7,7 @@ import {
   getAgentJob,
   startAgentJob,
 } from "./agentApi.js";
+import { describeProviderError, isProviderConnectionError } from "./providerError.js";
 
 const SETTINGS_KEY = "do-it.settings";
 const HISTORY_KEY = "do-it.history";
@@ -748,8 +749,12 @@ export default function App() {
             {error && (
               <div className="notice notice-error request-error" role="alert">
                 <span className="error-mark">!</span>
-                <div><strong>Couldn’t get a response</strong><span>{error}</span></div>
-                {error.toLowerCase().includes("api key") && (
+                <div>
+                  <strong>Couldn’t get a response</strong>
+                  <span>{describeProviderError(error, settings.provider, activeConfig.baseUrl)}</span>
+                </div>
+                {(error.toLowerCase().includes("api key")
+                  || isProviderConnectionError(error)) && (
                   <button onClick={() => setPage("settings")}>Open settings <Icon name="arrow" size={14} /></button>
                 )}
               </div>
